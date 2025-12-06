@@ -237,7 +237,8 @@ def get_image_generation_prompt(page_desc: str, outline_text: str,
     
     当前位于章节：{current_section}
     
-    要求文字清晰锐利，画面为4K分辨率 16:9比例。画面配色与风格保持严格一致。ppt使用全中文。{material_images_note}{extra_req_text}
+    要求文字清晰锐利，画面为4K分辨率 16:9比例。画面配色与风格保持严格一致。
+    注意，ppt页面中的所有文字一定要和当前主题和页面描述相关，请移除其他无关文字。ppt使用全中文。{material_images_note}{extra_req_text}
     """)
     
     logger.debug(f"[get_image_generation_prompt] Final prompt:\n{prompt}")
