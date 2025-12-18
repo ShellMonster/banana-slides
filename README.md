@@ -435,13 +435,6 @@ banana-slides/
 └── README.md                   # 本文件
 ```
 
-## 交流群
-为了方便大家沟通互助，建此微信交流群.
-
-欢迎提出新功能建议或反馈，本人也会~~佛系~~回答大家问题
-
-<img width="300" alt="image" src="https://github.com/user-attachments/assets/9060bc6b-4e6a-4f0f-90b1-c4ca8d5e6a95" />
-
 
 ## 🤝 贡献指南
 
