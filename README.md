@@ -192,6 +192,22 @@ bash setup-mirrors.sh cn       # 强制使用中国源
 bash setup-mirrors.sh global   # 强制使用国外源
 ```
 
+<details>
+<summary>⚡ 构建速度对比</summary>
+
+| 场景 | 构建时间 | 说明 |
+|------|---------|------|
+| **使用官方源** | 30-50 分钟 | 网络延迟高，经常超时失败 |
+| **使用国内镜像源** | 5-8 分钟 | 速度提升 5-6 倍 |
+
+**加速原理：**
+- apt 源：阿里云镜像（安装系统依赖）
+- PyPI 源：腾讯云镜像（安装 Python 包）
+- npm 源：淘宝 npmmirror（安装前端依赖）
+- ghcr.io：南京大学镜像（获取 uv 工具）
+
+</details>
+
 > **提示**：如需进一步加速基础镜像（python:3.10-slim, node:18-alpine）的下载，可在本机配置 Docker Hub 镜像加速器，详见脚本运行后的提示信息。
 
 3. **启动服务**
