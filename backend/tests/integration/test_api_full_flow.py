@@ -3,10 +3,11 @@ API Full Flow Integration Test
 
 This test validates the complete API flow without UI:
 1. Create project from idea
-2. Generate outline
-3. Generate descriptions  
-4. Generate images
-5. Export PPT
+2. Upload template image
+3. Generate outline
+4. Generate descriptions  
+5. Generate images (using template)
+6. Export PPT
 
 Note: 
 - This test requires REAL running backend service (not Flask test client)
@@ -18,7 +19,9 @@ import pytest
 import requests
 import time
 import os
+import io
 from pathlib import Path
+from PIL import Image
 
 
 # Skip these tests if service is not running (for backend-integration-test stage)
@@ -170,7 +173,7 @@ class TestAPIFullFlow:
     @pytest.mark.requires_service
     def test_api_full_flow_create_to_export(self, project_id):
         """
-        Test complete API flow: Create project → Outline → Descriptions → Images → Export PPT
+        Test complete API flow: Create project → Upload template → Outline → Descriptions → Images (with template) → Export PPT
         
         This test requires real AI API keys and takes 5-10 minutes to complete.
         """
@@ -197,6 +200,25 @@ class TestAPIFullFlow:
         pid = data['data']['project_id']
         project_id(pid)  # Register for cleanup
         print(f"✓ Project created successfully: {pid}\n")
+        
+        # Step 1.5: Upload template image
+        print('🖼️  Step 1.5: Uploading template image...')
+        # Create a simple test template image
+        template_img = Image.new('RGB', (1920, 1080), color='lightblue')
+        img_bytes = io.BytesIO()
+        template_img.save(img_bytes, format='PNG')
+        img_bytes.seek(0)
+        
+        response = requests.post(
+            f"{BASE_URL}/api/projects/{pid}/template",
+            files={'template_image': ('template.png', img_bytes, 'image/png')},
+            timeout=30
+        )
+        
+        assert response.status_code in [200, 201]
+        data = response.json()
+        assert data['success'] is True
+        print('✓ Template image uploaded successfully\n')
         
         # Step 2: Generate outline
         print('📋 Step 2: Triggering outline generation...')
@@ -249,7 +271,7 @@ class TestAPIFullFlow:
         response = requests.post(
             f"{BASE_URL}/api/projects/{pid}/generate/images",
             json={
-                'use_template': False,
+                'use_template': True,  # Use the uploaded template
                 'aspect_ratio': '16:9',
                 'resolution': '1080p'
             },

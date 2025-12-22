@@ -444,6 +444,22 @@ export const Settings: React.FC = () => {
                   </h2>
                   <div className="space-y-4">
                     {section.fields.map((field) => renderField(field))}
+                    {section.title === '大模型 API 配置' && (
+                      <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                        <p className="text-sm text-gray-700">
+                          API 密匙获取可前往{' '}
+                          <a
+                            href="https://aihubmix.com/?aff=17EC"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 hover:text-blue-800 underline font-medium"
+                          >
+                            AIHubmix
+                          </a>
+                          , 减小迁移成本
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
