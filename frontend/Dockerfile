@@ -5,8 +5,7 @@
 #   - NPM_MIRROR: npm 镜像源地址
 #
 # 使用方法：
-#   1. 自动配置：运行 bash setup-mirrors.sh 后执行 docker compose up -d
-#   2. 手动指定：docker compose build --build-arg NPM_MIRROR=https://registry.npmmirror.com/
+#   运行 bash setup-mirrors.sh 自动配置镜像源并启动构建
 # ============================================================================
 
 # -----------------------------------------------------------------------------

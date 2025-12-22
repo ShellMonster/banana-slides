@@ -7,8 +7,7 @@
 #   - PYPI_MIRROR: Python PyPI 镜像源
 #
 # 使用方法：
-#   1. 自动配置：运行 bash setup-mirrors.sh 后执行 docker compose up -d
-#   2. 手动指定：docker compose build --build-arg APT_MIRROR=mirrors.aliyun.com
+#   运行 bash setup-mirrors.sh 自动配置镜像源并启动构建
 # ============================================================================
 
 # -----------------------------------------------------------------------------
