@@ -177,6 +177,11 @@ OPENAI_API_BASE=https://api.openai.com/v1
 ...
 ```
 
+2. **启动服务**
+
+```bash
+docker compose up -d
+```
 <blockquote style="border-left: 5px solid #faad14; background: #fffbe6; color: #614700; padding: 10px 16px; margin: 12px 0;">
 <b>⚠️ 如遇网络问题，可执行以下命令自动配置国内镜像源：</b><br>
 
@@ -186,11 +191,6 @@ setup-mirrors.sh
 
 </blockquote>
 
-2. **启动服务**
-
-```bash
-docker compose up -d
-```
 
 3. **访问应用**
 
