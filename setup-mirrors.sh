@@ -53,8 +53,7 @@ show_help() {
     echo "  bash setup-mirrors.sh cn        # 使用中国源"
     echo "  bash setup-mirrors.sh global    # 使用国外源"
     echo ""
-    echo "配置完成后，运行以下命令启动服务："
-    echo "  docker compose up -d"
+    echo "配置完成后会自动启动 Docker 构建"
     echo ""
 }
 
@@ -257,28 +256,29 @@ show_summary() {
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
 
-    echo -e "${GREEN}下一步操作：${NC}"
+    echo -e "${GREEN}访问地址：${NC}"
     echo ""
-    echo "  1. 启动服务："
-    echo "     docker compose --env-file .env.detected up -d --build"
-    echo ""
-    echo "  2. 查看日志："
-    echo "     docker compose logs -f"
-    echo ""
-    echo "  3. 访问应用："
-    echo "     前端: http://localhost:3000"
-    echo "     后端: http://localhost:5000"
+    echo "  • 前端: http://localhost:3000"
+    echo "  • 后端: http://localhost:5000"
     echo ""
 }
 
 # ============================================================================
-# 导出环境变量（供 docker compose 构建时使用）
+# 启动 Docker 构建
 # ============================================================================
-export_env() {
-    if [ -f "$DETECTED_FILE" ]; then
-        set -a
-        source "$DETECTED_FILE"
-        set +a
+start_docker_build() {
+    echo ""
+    log_info "开始 Docker 构建..."
+    echo ""
+
+    # 使用 --env-file 传入环境变量进行构建
+    if docker compose --env-file "$DETECTED_FILE" up -d --build; then
+        echo ""
+        log_success "Docker 构建完成！"
+    else
+        echo ""
+        log_error "Docker 构建失败，请检查错误信息"
+        exit 1
     fi
 }
 
@@ -327,14 +327,14 @@ main() {
     # 生成配置文件
     generate_config "$region"
 
-    # 导出环境变量（供后续 docker compose 使用）
-    export_env
-
     # 修改 Dockerfile 中的 Docker Hub 镜像地址
     patch_dockerfiles "$region"
 
     # 显示摘要
     show_summary "$region"
+
+    # 自动启动 Docker 构建
+    start_docker_build
 }
 
 # 执行主函数
