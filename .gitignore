@@ -47,3 +47,6 @@ generate-example.py
 .cursor/worktrees.json
 uploads/
 !assets/*
+
+# 镜像源配置脚本的备份文件
+*.orig
