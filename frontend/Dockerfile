@@ -11,17 +11,15 @@ WORKDIR /app
 ARG VITE_API_BASE_URL
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 
-# 配置 npm 镜像源（如果指定）
-RUN if [ -n "$NPM_REGISTRY" ]; then \
-        npm config set registry "$NPM_REGISTRY"; \
-    fi
-
 # 复制 package.json
 COPY frontend/package.json ./
 
-# 安装依赖（如果有 package-lock.json 会使用它，否则会生成新的）
+# 安装依赖（如果配置了 NPM_REGISTRY，先设置镜像源）
 COPY frontend/package-lock.json* ./
-RUN npm install --frozen-lockfile 2>/dev/null || npm install
+RUN if [ -n "$NPM_REGISTRY" ]; then \
+        npm config set registry "$NPM_REGISTRY"; \
+    fi && \
+    npm install --frozen-lockfile 2>/dev/null || npm install
 
 # 复制前端源代码
 COPY frontend/ ./

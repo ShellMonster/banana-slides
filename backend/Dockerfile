@@ -14,13 +14,11 @@ FROM ${DOCKER_REGISTRY:-}python:3.10-slim
 # 设置工作目录
 WORKDIR /app
 
-# 配置 apt 镜像源（如果指定）
+# 安装系统依赖（如果配置了 APT_MIRROR，先替换镜像源）
 RUN if [ -n "$APT_MIRROR" ]; then \
         sed -i "s@deb.debian.org@$APT_MIRROR@g" /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
-    fi
-
-# 安装系统依赖
-RUN apt-get update && apt-get install -y \
+    fi && \
+    apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
