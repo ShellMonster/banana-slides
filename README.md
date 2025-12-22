@@ -184,9 +184,14 @@ docker compose up -d
 ```
 
 > [!WARNING]
-> 如遇网络问题，可执行以下命令自动配置国内镜像源：
-> ```bash
-> setup-mirrors.sh
+> 如遇网络问题，可在 `.env` 文件中取消镜像源配置的注释：
+> ```env
+> # 在 .env 文件中取消以下注释即可使用国内镜像源
+> DOCKER_REGISTRY=docker.1ms.run/
+> GHCR_REGISTRY=ghcr.nju.edu.cn/
+> APT_MIRROR=mirrors.aliyun.com
+> PYPI_INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple
+> NPM_REGISTRY=https://registry.npmmirror.com/
 > ```
 
 </blockquote>

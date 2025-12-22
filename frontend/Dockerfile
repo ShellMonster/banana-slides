@@ -1,10 +1,20 @@
+# 镜像源配置参数（可通过 build args 覆盖）
+ARG DOCKER_REGISTRY=
+ARG NPM_REGISTRY=
+
 # 构建阶段
-FROM node:18-alpine AS builder
+# 如果指定了 DOCKER_REGISTRY，使用镜像源；否则使用官方源
+FROM ${DOCKER_REGISTRY:-}node:18-alpine AS builder
 
 WORKDIR /app
 
 ARG VITE_API_BASE_URL
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+
+# 配置 npm 镜像源（如果指定）
+RUN if [ -n "$NPM_REGISTRY" ]; then \
+        npm config set registry "$NPM_REGISTRY"; \
+    fi
 
 # 复制 package.json
 COPY frontend/package.json ./
@@ -20,7 +30,8 @@ COPY frontend/ ./
 RUN npm run build
 
 # 生产阶段
-FROM nginx:alpine
+# 如果指定了 DOCKER_REGISTRY，使用镜像源；否则使用官方源
+FROM ${DOCKER_REGISTRY:-}nginx:alpine
 
 # 复制构建产物到 nginx
 COPY --from=builder /app/dist /usr/share/nginx/html
