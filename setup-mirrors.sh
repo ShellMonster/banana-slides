@@ -181,6 +181,49 @@ generate_config() {
 }
 
 # ============================================================================
+# 修改 Dockerfile 中的 Docker Hub 镜像地址
+# ============================================================================
+patch_dockerfiles() {
+    local region=$1
+    local docker_mirror="docker.1panel.live"  # 国内 Docker Hub 镜像
+
+    if [ "$region" = "CN" ]; then
+        log_info "配置 Docker Hub 镜像加速..."
+
+        # 修改 backend/Dockerfile
+        if [ -f "backend/Dockerfile" ]; then
+            # python:3.10-slim → docker.1panel.live/python:3.10-slim
+            sed -i.bak "s|^FROM python:|FROM ${docker_mirror}/python:|g" backend/Dockerfile
+            sed -i.bak "s|^FROM \${.*}python:|FROM ${docker_mirror}/python:|g" backend/Dockerfile 2>/dev/null || true
+            rm -f backend/Dockerfile.bak
+        fi
+
+        # 修改 frontend/Dockerfile
+        if [ -f "frontend/Dockerfile" ]; then
+            # node:18-alpine → docker.1panel.live/node:18-alpine
+            sed -i.bak "s|^FROM node:|FROM ${docker_mirror}/node:|g" frontend/Dockerfile
+            # nginx:alpine → docker.1panel.live/nginx:alpine
+            sed -i.bak "s|^FROM nginx:|FROM ${docker_mirror}/nginx:|g" frontend/Dockerfile
+            rm -f frontend/Dockerfile.bak
+        fi
+
+        log_success "Dockerfile 已配置 Docker Hub 镜像加速"
+    else
+        # 恢复为官方源
+        if [ -f "backend/Dockerfile" ]; then
+            sed -i.bak "s|^FROM docker\.1panel\.live/python:|FROM python:|g" backend/Dockerfile
+            rm -f backend/Dockerfile.bak
+        fi
+
+        if [ -f "frontend/Dockerfile" ]; then
+            sed -i.bak "s|^FROM docker\.1panel\.live/node:|FROM node:|g" frontend/Dockerfile
+            sed -i.bak "s|^FROM docker\.1panel\.live/nginx:|FROM nginx:|g" frontend/Dockerfile
+            rm -f frontend/Dockerfile.bak
+        fi
+    fi
+}
+
+# ============================================================================
 # 显示配置摘要
 # ============================================================================
 show_summary() {
@@ -196,6 +239,7 @@ show_summary() {
         echo "  • ghcr.io 镜像:  ghcr.nju.edu.cn (南京大学)"
         echo "  • PyPI 镜像源:   mirrors.cloud.tencent.com (腾讯云)"
         echo "  • npm 镜像源:    registry.npmmirror.com (淘宝)"
+        echo "  • Docker Hub:    docker.1panel.live (1Panel)"
     else
         echo -e "${CYAN}📍 当前配置: 国外官方源${NC}"
         echo ""
@@ -203,32 +247,12 @@ show_summary() {
         echo "  • ghcr.io 镜像:  ghcr.io (官方)"
         echo "  • PyPI 镜像源:   pypi.org (官方)"
         echo "  • npm 镜像源:    registry.npmjs.org (官方)"
+        echo "  • Docker Hub:    docker.io (官方)"
     fi
 
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
-
-    # Docker Hub 加速提示（仅中国用户）
-    if [ "$region" = "CN" ]; then
-        echo -e "${YELLOW}💡 Docker Hub 加速建议（可选）：${NC}"
-        echo ""
-        echo "   基础镜像（python:3.10-slim, node:18-alpine）从 Docker Hub 拉取，"
-        echo "   建议在本机配置 Docker 镜像加速器以提升速度："
-        echo ""
-        echo "   Linux/Mac: 编辑 ~/.docker/daemon.json"
-        echo "   Windows:   Docker Desktop → Settings → Docker Engine"
-        echo ""
-        echo '   添加以下配置：'
-        echo '   {'
-        echo '     "registry-mirrors": ["https://docker.1panel.live"]'
-        echo '   }'
-        echo ""
-        echo "   配置后重启 Docker 服务生效。"
-        echo ""
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo ""
-    fi
 
     echo -e "${GREEN}下一步操作：${NC}"
     echo ""
@@ -288,6 +312,9 @@ main() {
 
     # 生成配置文件
     generate_config "$region"
+
+    # 修改 Dockerfile 中的 Docker Hub 镜像地址
+    patch_dockerfiles "$region"
 
     # 显示摘要
     show_summary "$region"
