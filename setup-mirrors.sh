@@ -185,39 +185,42 @@ generate_config() {
 # ============================================================================
 patch_dockerfiles() {
     local region=$1
-    local docker_mirror="docker.1panel.live"  # 国内 Docker Hub 镜像
+    local docker_mirror="docker.1ms.run"  # 国内 Docker Hub 镜像（2025年可用）
 
     if [ "$region" = "CN" ]; then
         log_info "配置 Docker Hub 镜像加速..."
 
         # 修改 backend/Dockerfile
         if [ -f "backend/Dockerfile" ]; then
-            # python:3.10-slim → docker.1panel.live/python:3.10-slim
+            # python:3.10-slim → docker.1ms.run/python:3.10-slim
+            # 先恢复可能存在的旧镜像配置，再应用新配置
+            sed -i.bak "s|^FROM [^/]*/python:|FROM python:|g" backend/Dockerfile 2>/dev/null || true
             sed -i.bak "s|^FROM python:|FROM ${docker_mirror}/python:|g" backend/Dockerfile
-            sed -i.bak "s|^FROM \${.*}python:|FROM ${docker_mirror}/python:|g" backend/Dockerfile 2>/dev/null || true
             rm -f backend/Dockerfile.bak
         fi
 
         # 修改 frontend/Dockerfile
         if [ -f "frontend/Dockerfile" ]; then
-            # node:18-alpine → docker.1panel.live/node:18-alpine
+            # 先恢复可能存在的旧镜像配置
+            sed -i.bak "s|^FROM [^/]*/node:|FROM node:|g" frontend/Dockerfile 2>/dev/null || true
+            sed -i.bak "s|^FROM [^/]*/nginx:|FROM nginx:|g" frontend/Dockerfile 2>/dev/null || true
+            # 再应用新配置
             sed -i.bak "s|^FROM node:|FROM ${docker_mirror}/node:|g" frontend/Dockerfile
-            # nginx:alpine → docker.1panel.live/nginx:alpine
             sed -i.bak "s|^FROM nginx:|FROM ${docker_mirror}/nginx:|g" frontend/Dockerfile
             rm -f frontend/Dockerfile.bak
         fi
 
         log_success "Dockerfile 已配置 Docker Hub 镜像加速"
     else
-        # 恢复为官方源
+        # 恢复为官方源（匹配任意镜像前缀）
         if [ -f "backend/Dockerfile" ]; then
-            sed -i.bak "s|^FROM docker\.1panel\.live/python:|FROM python:|g" backend/Dockerfile
+            sed -i.bak "s|^FROM [^/]*/python:|FROM python:|g" backend/Dockerfile 2>/dev/null || true
             rm -f backend/Dockerfile.bak
         fi
 
         if [ -f "frontend/Dockerfile" ]; then
-            sed -i.bak "s|^FROM docker\.1panel\.live/node:|FROM node:|g" frontend/Dockerfile
-            sed -i.bak "s|^FROM docker\.1panel\.live/nginx:|FROM nginx:|g" frontend/Dockerfile
+            sed -i.bak "s|^FROM [^/]*/node:|FROM node:|g" frontend/Dockerfile 2>/dev/null || true
+            sed -i.bak "s|^FROM [^/]*/nginx:|FROM nginx:|g" frontend/Dockerfile 2>/dev/null || true
             rm -f frontend/Dockerfile.bak
         fi
     fi
@@ -239,7 +242,7 @@ show_summary() {
         echo "  • ghcr.io 镜像:  ghcr.nju.edu.cn (南京大学)"
         echo "  • PyPI 镜像源:   mirrors.cloud.tencent.com (腾讯云)"
         echo "  • npm 镜像源:    registry.npmmirror.com (淘宝)"
-        echo "  • Docker Hub:    docker.1panel.live (1Panel)"
+        echo "  • Docker Hub:    docker.1ms.run"
     else
         echo -e "${CYAN}📍 当前配置: 国外官方源${NC}"
         echo ""
