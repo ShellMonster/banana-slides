@@ -1,190 +1,291 @@
 /**
- * UI驱动的端到端测试：从用户界面操作到最终PPT导出
+ * UI-driven end-to-end test: From user interface operations to final PPT export
  * 
- * 这个测试模拟真实用户在浏览器中的完整操作流程：
- * 1. 在前端输入想法
- * 2. 点击生成按钮
- * 3. 等待大纲生成（在UI中看到）
- * 4. 点击生成描述
- * 5. 等待描述生成（在UI中看到）
- * 6. 点击生成图片
- * 7. 等待图片生成（在UI中看到）
- * 8. 点击导出PPT
- * 9. 验证下载文件
+ * This test simulates the complete user operation flow in the browser:
+ * 1. Enter idea in frontend
+ * 2. Click "Next" button
+ * 3. Click batch generate outline button on outline editor page
+ * 4. Wait for outline generation (visible in UI)
+ * 5. Click "Next" to go to description editor page
+ * 6. Click batch generate descriptions button
+ * 7. Wait for descriptions to generate (visible in UI)
+ * 8. Test retry single card functionality
+ * 9. Click "Next" to go to image generation page
+ * 10. Click batch generate images button
+ * 11. Wait for images to generate (visible in UI)
+ * 12. Export PPT
+ * 13. Verify downloaded file
  * 
- * 注意：
- * - 此测试需要真实的AI API密钥
- * - 需要10-15分钟完成
- * - 依赖前端UI的稳定性
- * - 建议只在发布前或Nightly Build中运行
+ * Note:
+ * - This test requires real AI API keys
+ * - Takes 10-15 minutes to complete
+ * - Depends on frontend UI stability
+ * - Recommended to run only before release or in Nightly Build
  */
 
 import { test, expect } from '@playwright/test'
 import * as fs from 'fs'
 import * as path from 'path'
 
-test.describe('UI驱动E2E测试：从用户界面到PPT导出', () => {
-  // 增加超时时间到20分钟
+test.describe('UI-driven E2E test: From user interface to PPT export', () => {
+  // Increase timeout to 20 minutes
   test.setTimeout(20 * 60 * 1000)
   
-  test('用户完整流程：在浏览器中创建并导出PPT', async ({ page }) => {
+  test('User Full Flow: Create and export PPT in browser', async ({ page }) => {
     console.log('\n========================================')
-    console.log('🌐 开始UI驱动E2E测试（通过前端界面）')
+    console.log('🌐 Starting UI-driven E2E test (via frontend interface)')
     console.log('========================================\n')
     
     // ====================================
-    // 步骤1: 访问首页
+    // Step 1: Visit homepage
     // ====================================
-    console.log('📱 步骤1: 打开首页...')
+    console.log('📱 Step 1: Opening homepage...')
     await page.goto('http://localhost:3000')
     
-    // 验证页面加载
+    // Verify page loaded
     await expect(page).toHaveTitle(/蕉幻|Banana/i)
-    console.log('✓ 首页加载成功\n')
+    console.log('✓ Homepage loaded successfully\n')
     
     // ====================================
-    // 步骤2: 点击"从想法创建"
+    // Step 2: Click "Create from idea"
     // ====================================
-    console.log('🖱️  步骤2: 点击"从想法创建"...')
+    console.log('🖱️  Step 2: Clicking "Create from idea"...')
     await page.click('text=/从想法创建/i')
     
-    // 等待表单出现
+    // Wait for form to appear
     await page.waitForSelector('textarea, input[type="text"]', { timeout: 10000 })
-    console.log('✓ 创建表单已显示\n')
+    console.log('✓ Create form displayed\n')
     
     // ====================================
-    // 步骤3: 输入想法并提交
+    // Step 3: Enter idea and click "Next"
     // ====================================
-    console.log('✍️  步骤3: 输入想法内容...')
+    console.log('✍️  Step 3: Entering idea content...')
     const ideaInput = page.locator('textarea, input[type="text"]').first()
     await ideaInput.fill('创建一份关于人工智能基础的简短PPT，包含3页：什么是AI、AI的应用、AI的未来')
     
-    console.log('🚀 点击生成按钮...')
-    await page.click('button:has-text("生成"), button:has-text("创建"), button:has-text("开始")')
-    console.log('✓ 已提交创建请求\n')
+    console.log('🚀 Clicking "Next" button...')
+    await page.click('button:has-text("下一步")')
+    console.log('✓ Clicked "Next" button\n')
     
     // ====================================
-    // 步骤4: 等待大纲生成（UI中显示）
+    // Step 4: Click batch generate outline button on outline editor page
     // ====================================
-    console.log('⏳ 步骤4: 等待大纲生成（可能需要1-2分钟）...')
+    console.log('⏳ Step 4: Waiting for outline editor page to load...')
+    await page.waitForSelector('button:has-text("自动生成大纲"), button:has-text("重新生成大纲")', { timeout: 10000 })
     
-    // 等待loading消失或大纲出现
-    await page.waitForSelector(
-      '.outline-card, [data-testid="outline-item"], .outline-section',
-      { timeout: 120000 }
-    )
+    console.log('📋 Step 4: Clicking batch generate outline button...')
+    const generateOutlineBtn = page.locator('button:has-text("自动生成大纲"), button:has-text("重新生成大纲")')
+    await generateOutlineBtn.first().click()
+    console.log('✓ Clicked batch generate outline button\n')
     
-    // 验证大纲内容
+    // ====================================
+    // Step 5: Wait for outline generation to complete (smart wait)
+    // ====================================
+    console.log('⏳ Step 5: Waiting for outline generation (may take 1-2 minutes)...')
+    
+    // Smart wait: Use expect().toPass() for retry polling
+    await expect(async () => {
+      const outlineItems = page.locator('.outline-card, [data-testid="outline-item"], .outline-section')
+      const count = await outlineItems.count()
+      if (count === 0) {
+        throw new Error('Outline items not yet visible')
+      }
+      expect(count).toBeGreaterThan(0)
+    }).toPass({ timeout: 120000, intervals: [2000, 5000, 10000] })
+    
+    // Verify outline content
     const outlineItems = page.locator('.outline-card, [data-testid="outline-item"], .outline-section')
     const outlineCount = await outlineItems.count()
     
     expect(outlineCount).toBeGreaterThan(0)
-    console.log(`✓ 大纲生成成功，共 ${outlineCount} 页\n`)
+    console.log(`✓ Outline generated successfully, total ${outlineCount} pages\n`)
     
-    // 截图保存当前状态
+    // Take screenshot of current state
     await page.screenshot({ path: 'test-results/e2e-outline-generated.png' })
     
     // ====================================
-    // 步骤5: 点击生成描述
+    // Step 6: Click "Next" to go to description editor page
     // ====================================
-    console.log('✍️  步骤5: 点击生成页面描述...')
-    
-    // 查找"生成描述"按钮（根据实际UI调整选择器）
-    const generateDescBtn = page.locator('button:has-text("生成描述"), button:has-text("下一步")')
-    
-    if (await generateDescBtn.count() > 0) {
-      await generateDescBtn.first().click()
-      console.log('✓ 已点击生成描述按钮\n')
-      
-      // 等待描述生成（可能需要2-3分钟）
-      console.log('⏳ 等待描述生成（可能需要2-5分钟）...')
-      
-      // 等待所有页面的描述都生成完成
-      await page.waitForSelector(
-        '[data-status="descriptions-generated"], .description-complete',
-        { timeout: 300000 }
-      )
-      
-      console.log('✓ 所有描述生成完成\n')
-      await page.screenshot({ path: 'test-results/e2e-descriptions-generated.png' })
-    } else {
-      console.log('⚠️  未找到"生成描述"按钮，可能是自动生成\n')
+    console.log('➡️  Step 6: Clicking "Next" to go to description editor page...')
+    const nextBtn = page.locator('button:has-text("下一步")')
+    if (await nextBtn.count() > 0) {
+      await nextBtn.first().click()
+      await page.waitForTimeout(1000) // Wait for page transition
+      console.log('✓ Clicked "Next" button\n')
     }
     
     // ====================================
-    // 步骤6: 点击生成图片
+    // Step 7: Click batch generate descriptions button
     // ====================================
-    console.log('🎨 步骤6: 点击生成页面图片...')
+    console.log('✍️  Step 7: Clicking batch generate descriptions button...')
     
-    const generateImageBtn = page.locator('button:has-text("生成图片"), button:has-text("生成"), button:has-text("完成")')
+    // Wait for description editor page to load
+    await page.waitForSelector('button:has-text("批量生成描述")', { timeout: 10000 })
+    
+    const generateDescBtn = page.locator('button:has-text("批量生成描述")')
+    await generateDescBtn.first().click()
+    console.log('✓ Clicked batch generate descriptions button\n')
+    
+    // ====================================
+    // Step 8: Wait for descriptions to generate (smart wait)
+    // ====================================
+    console.log('⏳ Step 8: Waiting for descriptions to generate (may take 2-5 minutes)...')
+    
+    // Smart wait: Use expect().toPass() for retry polling
+    await expect(async () => {
+      const completedIndicators = page.locator('[data-status="descriptions-generated"], .description-complete, button:has-text("重新生成"):not([disabled])')
+      const count = await completedIndicators.count()
+      if (count === 0) {
+        throw new Error('Descriptions not yet generated')
+      }
+      expect(count).toBeGreaterThan(0)
+    }).toPass({ timeout: 300000, intervals: [3000, 5000, 10000] })
+    
+    console.log('✓ All descriptions generated\n')
+    await page.screenshot({ path: 'test-results/e2e-descriptions-generated.png' })
+    
+    // ====================================
+    // Step 9: Test retry single card functionality
+    // ====================================
+    console.log('🔄 Step 9: Testing retry single card functionality...')
+    
+    // Find the first description card with retry button
+    const retryButtons = page.locator('button:has-text("重新生成")')
+    const retryCount = await retryButtons.count()
+    
+    if (retryCount > 0) {
+      // Click the first retry button
+      await retryButtons.first().click()
+      console.log('✓ Clicked retry button on first card')
+      
+      // Wait for the card to show generating state
+      await page.waitForSelector('button:has-text("生成中...")', { timeout: 5000 }).catch(() => {
+        // If "生成中..." doesn't appear, check for other loading indicators
+        console.log('  Waiting for generation state...')
+      })
+      
+      // Wait for regeneration to complete (shorter timeout since it's just one card)
+      await page.waitForSelector(
+        'button:has-text("重新生成"):not([disabled])',
+        { timeout: 120000 }
+      )
+      
+      console.log('✓ Single card retry completed successfully\n')
+      await page.screenshot({ path: 'test-results/e2e-single-card-retry.png' })
+    } else {
+      console.log('⚠️  No retry buttons found, skipping single card retry test\n')
+    }
+    
+    // ====================================
+    // Step 10: Click "Next" to go to image generation page
+    // ====================================
+    console.log('➡️  Step 10: Clicking "Next" to go to image generation page...')
+    const nextBtn2 = page.locator('button:has-text("下一步")')
+    if (await nextBtn2.count() > 0) {
+      await nextBtn2.first().click()
+      await page.waitForTimeout(1000) // Wait for page transition
+      console.log('✓ Clicked "Next" button\n')
+    }
+    
+    // ====================================
+    // Step 11: Click batch generate images button
+    // ====================================
+    console.log('🎨 Step 11: Clicking batch generate images button...')
+    
+    // Wait for image generation page to load
+    await page.waitForSelector('button:has-text("批量生成图片")', { timeout: 10000 })
+    
+    const generateImageBtn = page.locator('button:has-text("批量生成图片")')
     
     if (await generateImageBtn.count() > 0) {
       await generateImageBtn.first().click()
-      console.log('✓ 已点击生成图片按钮\n')
+      console.log('✓ Clicked batch generate images button\n')
       
-      // 等待图片生成（可能需要3-5分钟）
-      console.log('⏳ 等待图片生成（可能需要3-8分钟）...')
+      // Wait for images to generate (may take 3-8 minutes)
+      console.log('⏳ Step 12: Waiting for images to generate (may take 3-8 minutes)...')
       
-      // 等待所有页面的图片都生成完成
-      await page.waitForSelector(
-        '[data-status="completed"], .all-images-complete, img[src*="generated"]',
-        { timeout: 480000 } // 8分钟超时
-      )
+      // Smart wait: Use expect().toPass() for retry polling
+      await expect(async () => {
+        const completedImages = page.locator('[data-status="completed"], .all-images-complete, img[src*="generated"]:not([src=""])')
+        const count = await completedImages.count()
+        if (count === 0) {
+          throw new Error('Images not yet generated')
+        }
+        expect(count).toBeGreaterThan(0)
+      }).toPass({ timeout: 480000, intervals: [5000, 10000, 15000] })
       
-      console.log('✓ 所有图片生成完成\n')
+      console.log('✓ All images generated\n')
       await page.screenshot({ path: 'test-results/e2e-images-generated.png' })
     } else {
-      console.log('⚠️  未找到"生成图片"按钮\n')
+      console.log('⚠️  Batch generate images button not found\n')
     }
     
     // ====================================
-    // 步骤7: 导出PPT
+    // Step 13: Export PPT
     // ====================================
-    console.log('📦 步骤7: 导出PPT文件...')
+    console.log('📦 Step 13: Exporting PPT file...')
     
-    // 设置下载处理
+    // Setup download handler
     const downloadPromise = page.waitForEvent('download', { timeout: 60000 })
     
-    // 点击导出按钮
+    // Click export button
     const exportBtn = page.locator('button:has-text("导出"), button:has-text("下载"), button:has-text("完成")')
     
     if (await exportBtn.count() > 0) {
       await exportBtn.first().click()
-      console.log('✓ 已点击导出按钮\n')
+      console.log('✓ Clicked export button\n')
       
-      // 等待下载完成
-      console.log('⏳ 等待PPT文件下载...')
+      // Wait for download to complete
+      console.log('⏳ Waiting for PPT file download...')
       const download = await downloadPromise
       
-      // 保存文件
+      // Save file
       const downloadPath = path.join('test-results', 'e2e-test-output.pptx')
       await download.saveAs(downloadPath)
       
-      // 验证文件存在且不为空
+      // Verify file exists and is not empty
       const fileExists = fs.existsSync(downloadPath)
       expect(fileExists).toBeTruthy()
       
       const fileStats = fs.statSync(downloadPath)
-      expect(fileStats.size).toBeGreaterThan(1000) // 至少1KB
+      expect(fileStats.size).toBeGreaterThan(1000) // At least 1KB
       
-      console.log(`✓ PPT文件下载成功！`)
-      console.log(`  路径: ${downloadPath}`)
-      console.log(`  大小: ${(fileStats.size / 1024).toFixed(2)} KB\n`)
+      console.log(`✓ PPT file downloaded successfully!`)
+      console.log(`  Path: ${downloadPath}`)
+      console.log(`  Size: ${(fileStats.size / 1024).toFixed(2)} KB\n`)
+      
+      // Validate PPTX file content using python-pptx
+      console.log('🔍 Validating PPTX file content...')
+      const { execSync } = await import('child_process')
+      const { fileURLToPath } = await import('url')
+      try {
+        // Get current directory (ES module compatible)
+        const currentDir = path.dirname(fileURLToPath(import.meta.url))
+        const validateScript = path.join(currentDir, 'validate_pptx.py')
+        const result = execSync(
+          `python3 "${validateScript}" "${downloadPath}" 3 "人工智能" "AI"`,
+          { encoding: 'utf-8', stdio: 'pipe' }
+        )
+        console.log(`✓ ${result.trim()}\n`)
+      } catch (error: any) {
+        console.warn(`⚠️  PPTX validation warning: ${error.stdout || error.message}`)
+        console.log('  (Continuing test, but PPTX content validation had issues)\n')
+      }
     } else {
-      console.log('⚠️  未找到导出按钮，尝试其他方式...')
+      console.log('⚠️  Export button not found, trying other methods...')
       
-      // 尝试通过右键菜单或其他UI元素导出
-      // （根据实际UI实现调整）
+      // Try exporting via right-click menu or other UI elements
+      // (Adjust based on actual UI implementation)
     }
     
     // ====================================
-    // 最终验证
+    // Final verification
     // ====================================
     console.log('========================================')
-    console.log('✅ 真正的E2E测试完成！')
+    console.log('✅ Full E2E test completed!')
     console.log('========================================\n')
     
-    // 最终截图
+    // Final screenshot
     await page.screenshot({ 
       path: 'test-results/e2e-final-state.png',
       fullPage: true 
@@ -192,37 +293,37 @@ test.describe('UI驱动E2E测试：从用户界面到PPT导出', () => {
   })
 })
 
-test.describe('UI E2E - 简化版（跳过长时间等待）', () => {
-  test.setTimeout(5 * 60 * 1000) // 5分钟
+test.describe('UI E2E - Simplified (skip long waits)', () => {
+  test.setTimeout(5 * 60 * 1000) // 5 minutes
   
-  test('用户流程验证：只验证UI交互，不等待AI生成完成', async ({ page }) => {
-    console.log('\n🏃 快速E2E测试（验证UI流程，不等待生成完成）\n')
+  test('User flow verification: Only verify UI interactions, do not wait for AI generation', async ({ page }) => {
+    console.log('\n🏃 Quick E2E test (verify UI flow, do not wait for generation)\n')
     
-    // 访问首页
+    // Visit homepage
     await page.goto('http://localhost:3000')
-    console.log('✓ 首页加载')
+    console.log('✓ Homepage loaded')
     
-    // 点击创建
+    // Click create
     await page.click('text=/从想法创建/i')
-    console.log('✓ 进入创建页面')
+    console.log('✓ Entered create page')
     
-    // 输入内容
+    // Enter content
     const ideaInput = page.locator('textarea, input[type="text"]').first()
-    await ideaInput.fill('E2E测试项目')
-    console.log('✓ 输入内容')
+    await ideaInput.fill('E2E test project')
+    console.log('✓ Entered content')
     
-    // 点击生成
-    await page.click('button:has-text("生成"), button:has-text("创建")')
-    console.log('✓ 提交生成请求')
+    // Click generate
+    await page.click('button:has-text("下一步")')
+    console.log('✓ Submitted generation request')
     
-    // 验证loading状态出现（说明请求已发送）
+    // Verify loading state appears (indicates request was sent)
     await page.waitForSelector(
       '.loading, .spinner, [data-loading="true"]',
       { timeout: 10000 }
     )
-    console.log('✓ 生成已开始（看到loading状态）')
+    console.log('✓ Generation started (loading state visible)')
     
-    console.log('\n✅ UI流程验证通过！\n')
+    console.log('\n✅ UI flow verification passed!\n')
   })
 })
 

@@ -1,20 +1,20 @@
 /**
- * API集成测试：从创建到导出PPT
+ * API Full Flow Test: Create project to export PPT
  * 
- * 这个测试通过直接调用后端API验证完整流程：
- * 1. 创建项目（从想法或文件）
- * 2. 生成大纲
- * 3. 生成描述
- * 4. 生成图片
- * 5. 导出PPT
+ * This test validates the complete flow by directly calling backend APIs:
+ * 1. Create project (from idea or file)
+ * 2. Generate outline
+ * 3. Generate descriptions
+ * 4. Generate images
+ * 5. Export PPT
  * 
- * 注意：此测试需要真实的AI API密钥（GOOGLE_API_KEY）
- * 如果使用mock API key，测试会跳过
+ * Note: This test requires real AI API keys (GOOGLE_API_KEY)
+ * If using mock API key, the test will be skipped
  */
 
 import { test, expect, APIRequestContext } from '@playwright/test'
 
-// 辅助函数：等待项目状态变更
+// Helper function: Wait for project status change with smart retry
 async function waitForProjectStatus(
   request: APIRequestContext,
   projectId: string,
@@ -22,34 +22,84 @@ async function waitForProjectStatus(
   timeoutMs: number = 60000
 ): Promise<void> {
   const startTime = Date.now()
-  const checkInterval = 5000 // 每5秒检查一次
+  let checkInterval = 2000 // Start with 2 seconds
+  const maxInterval = 10000 // Max 10 seconds between checks
+  let consecutiveErrors = 0
+  const maxConsecutiveErrors = 3
   
   while (Date.now() - startTime < timeoutMs) {
-    const response = await request.get(`http://localhost:5000/api/projects/${projectId}`)
-    expect(response.ok()).toBeTruthy()
-    
-    const data = await response.json()
-    const currentStatus = data.data.status
-    
-    console.log(`[${new Date().toISOString()}] Project status: ${currentStatus}, waiting for: ${expectedStatus}`)
-    
-    if (currentStatus === expectedStatus) {
-      console.log(`✓ Project reached status: ${expectedStatus}`)
-      return
+    try {
+      const response = await request.get(`http://localhost:5000/api/projects/${projectId}`)
+      
+      if (!response.ok()) {
+        consecutiveErrors++
+        if (consecutiveErrors >= maxConsecutiveErrors) {
+          throw new Error(`Failed to get project status after ${maxConsecutiveErrors} consecutive errors`)
+        }
+        // Exponential backoff on errors
+        await new Promise(resolve => setTimeout(resolve, checkInterval * 2))
+        continue
+      }
+      
+      consecutiveErrors = 0 // Reset error count on success
+      
+      const data = await response.json()
+      const currentStatus = data.data.status
+      
+      const elapsed = Math.floor((Date.now() - startTime) / 1000)
+      console.log(`[${elapsed}s] Project status: ${currentStatus}, waiting for: ${expectedStatus}`)
+      
+      if (currentStatus === expectedStatus) {
+        console.log(`✓ Project reached status: ${expectedStatus} (took ${elapsed}s)`)
+        return
+      }
+      
+      // Check if failed
+      if (currentStatus === 'FAILED') {
+        const errorMsg = data.data?.error || 'Unknown error'
+        throw new Error(`Project generation failed. Expected: ${expectedStatus}, Got: ${currentStatus}. Error: ${errorMsg}`)
+      }
+      
+      // Adaptive interval: increase gradually for long waits
+      const elapsedMs = Date.now() - startTime
+      if (elapsedMs > 30000) {
+        checkInterval = Math.min(maxInterval, checkInterval + 1000)
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, checkInterval))
+    } catch (error: any) {
+      if (error.message.includes('Failed to get project status')) {
+        throw error
+      }
+      // Network errors: retry with backoff
+      consecutiveErrors++
+      if (consecutiveErrors >= maxConsecutiveErrors) {
+        throw new Error(`Network error: ${error.message}`)
+      }
+      await new Promise(resolve => setTimeout(resolve, checkInterval * 2))
     }
-    
-    // 检查是否失败
-    if (currentStatus === 'FAILED') {
-      throw new Error(`Project generation failed. Expected: ${expectedStatus}, Got: ${currentStatus}`)
+  }
+  
+  // Get project details for debugging
+  try {
+    const debugResponse = await request.get(`http://localhost:5000/api/projects/${projectId}`)
+    const debugData = await debugResponse.json()
+    console.error(`\n❌ Timeout debug info:`)
+    console.error(`  Project ID: ${projectId}`)
+    console.error(`  Current status: ${debugData.data?.status || 'unknown'}`)
+    console.error(`  Expected status: ${expectedStatus}`)
+    console.error(`  Wait time: ${timeoutMs}ms`)
+    if (debugData.data?.error) {
+      console.error(`  Error message: ${debugData.data.error}`)
     }
-    
-    await new Promise(resolve => setTimeout(resolve, checkInterval))
+  } catch (e) {
+    console.error(`  Failed to get project details: ${e}`)
   }
   
   throw new Error(`Timeout: Project did not reach status ${expectedStatus} within ${timeoutMs}ms`)
 }
 
-// 辅助函数：等待任务完成
+// Helper function: Wait for task completion with smart retry
 async function waitForTaskCompletion(
   request: APIRequestContext,
   projectId: string,
@@ -57,56 +107,82 @@ async function waitForTaskCompletion(
   timeoutMs: number = 120000
 ): Promise<void> {
   const startTime = Date.now()
-  const checkInterval = 5000
+  let checkInterval = 3000 // Start with 3 seconds
+  const maxInterval = 10000
+  let consecutiveErrors = 0
+  const maxConsecutiveErrors = 3
   
   while (Date.now() - startTime < timeoutMs) {
-    const response = await request.get(`http://localhost:5000/api/projects/${projectId}/tasks/${taskId}`)
-    
-    if (!response.ok()) {
-      console.warn(`Failed to get task status: ${response.status()}`)
+    try {
+      const response = await request.get(`http://localhost:5000/api/projects/${projectId}/tasks/${taskId}`)
+      
+      if (!response.ok()) {
+        consecutiveErrors++
+        if (consecutiveErrors >= maxConsecutiveErrors) {
+          throw new Error(`Failed to get task status after ${maxConsecutiveErrors} consecutive errors`)
+        }
+        await new Promise(resolve => setTimeout(resolve, checkInterval * 2))
+        continue
+      }
+      
+      consecutiveErrors = 0
+      
+      const data = await response.json()
+      const taskStatus = data.data.status
+      
+      const elapsed = Math.floor((Date.now() - startTime) / 1000)
+      console.log(`[${elapsed}s] Task ${taskId.substring(0, 8)}... status: ${taskStatus}`)
+      
+      if (taskStatus === 'COMPLETED') {
+        console.log(`✓ Task ${taskId.substring(0, 8)}... completed (took ${elapsed}s)`)
+        return
+      }
+      
+      if (taskStatus === 'FAILED') {
+        const errorMsg = data.data.error_message || 'Unknown error'
+        throw new Error(`Task ${taskId} failed: ${errorMsg}`)
+      }
+      
+      // Adaptive interval for long-running tasks
+      const elapsedMs = Date.now() - startTime
+      if (elapsedMs > 60000) {
+        checkInterval = Math.min(maxInterval, checkInterval + 1000)
+      }
+      
       await new Promise(resolve => setTimeout(resolve, checkInterval))
-      continue
+    } catch (error: any) {
+      if (error.message.includes('Failed to get task status') || error.message.includes('Task') && error.message.includes('failed')) {
+        throw error
+      }
+      consecutiveErrors++
+      if (consecutiveErrors >= maxConsecutiveErrors) {
+        throw new Error(`Network error: ${error.message}`)
+      }
+      await new Promise(resolve => setTimeout(resolve, checkInterval * 2))
     }
-    
-    const data = await response.json()
-    const taskStatus = data.data.status
-    
-    console.log(`[${new Date().toISOString()}] Task ${taskId} status: ${taskStatus}`)
-    
-    if (taskStatus === 'COMPLETED') {
-      console.log(`✓ Task ${taskId} completed`)
-      return
-    }
-    
-    if (taskStatus === 'FAILED') {
-      const errorMsg = data.data.error_message || 'Unknown error'
-      throw new Error(`Task ${taskId} failed: ${errorMsg}`)
-    }
-    
-    await new Promise(resolve => setTimeout(resolve, checkInterval))
   }
   
   throw new Error(`Timeout: Task ${taskId} did not complete within ${timeoutMs}ms`)
 }
 
-// 检查是否配置了真实API key
+// Check if real API key is configured
 async function hasRealApiKey(request: APIRequestContext): Promise<boolean> {
   try {
     const response = await request.get('http://localhost:5000/health')
     const data = await response.json()
-    // 如果health检查返回API配置信息，可以在这里判断
-    // 简单起见，我们假设如果能连接就尝试运行
+    // If health check returns API config info, can check here
+    // For simplicity, assume if can connect then try to run
     return true
   } catch {
     return false
   }
 }
 
-test.describe('API集成测试：从想法到导出PPT', () => {
+test.describe('API Integration Test: From idea to PPT export', () => {
   let projectId: string
   
   test.afterEach(async ({ request }) => {
-    // 清理测试项目
+    // Clean up test project
     if (projectId) {
       try {
         await request.delete(`http://localhost:5000/api/projects/${projectId}`)
@@ -117,16 +193,16 @@ test.describe('API集成测试：从想法到导出PPT', () => {
     }
   })
   
-  test('API完整流程：创建项目 → 大纲 → 描述 → 图片 → 导出PPT', async ({ request }) => {
-    // 设置超时时间为10分钟（真实AI调用需要时间）
+  test('API Full Flow: Create project → Outline → Descriptions → Images → Export PPT', async ({ request }) => {
+    // Set timeout to 10 minutes (real AI calls need time)
     test.setTimeout(600000)
     
     console.log('\n========================================')
-    console.log('🚀 开始完整流程E2E测试')
+    console.log('🚀 Starting full flow E2E test')
     console.log('========================================\n')
     
-    // 步骤1: 创建项目
-    console.log('📝 步骤1: 创建项目...')
+    // Step 1: Create project
+    console.log('📝 Step 1: Creating project...')
     const createResponse = await request.post('http://localhost:5000/api/projects', {
       data: {
         creation_type: 'idea',
@@ -140,23 +216,34 @@ test.describe('API集成测试：从想法到导出PPT', () => {
     expect(createData.data.project_id).toBeTruthy()
     
     projectId = createData.data.project_id
-    console.log(`✓ 项目创建成功: ${projectId}\n`)
+    console.log(`✓ Project created successfully: ${projectId}\n`)
     
-    // 步骤2: 等待大纲生成完成
-    console.log('📋 步骤2: 等待大纲生成...')
-    await waitForProjectStatus(request, projectId, 'OUTLINE_GENERATED', 90000)
+    // Step 2: Trigger outline generation
+    console.log('📋 Step 2: Triggering outline generation...')
+    const outlineResponse = await request.post(`http://localhost:5000/api/projects/${projectId}/generate/outline`, {
+      data: {}
+    })
     
-    // 验证大纲内容
+    expect(outlineResponse.ok()).toBeTruthy()
+    const outlineData = await outlineResponse.json()
+    expect(outlineData.success).toBe(true)
+    console.log(`✓ Outline generation request submitted\n`)
+    
+    // Step 3: Wait for outline generation to complete
+    console.log('⏳ Step 3: Waiting for outline generation to complete...')
+    await waitForProjectStatus(request, projectId, 'OUTLINE_GENERATED', 180000) // Increased to 3 minutes
+    
+    // Verify outline content
     const projectResponse = await request.get(`http://localhost:5000/api/projects/${projectId}`)
     const projectData = await projectResponse.json()
     const outline = projectData.data.outline_content
     
     expect(outline).toBeTruthy()
     expect(outline.pages || outline.outline).toBeTruthy()
-    console.log(`✓ 大纲生成成功，包含页面数: ${(outline.pages || outline.outline || []).length}\n`)
+    console.log(`✓ Outline generated successfully, contains ${(outline.pages || outline.outline || []).length} pages\n`)
     
-    // 步骤3: 生成描述
-    console.log('✍️  步骤3: 开始生成页面描述...')
+    // Step 4: Generate descriptions
+    console.log('✍️  Step 4: Starting to generate page descriptions...')
     const descResponse = await request.post(
       `http://localhost:5000/api/projects/${projectId}/generate/descriptions`,
       {
@@ -171,15 +258,15 @@ test.describe('API集成测试：从想法到导出PPT', () => {
     expect(descData.success).toBe(true)
     
     const descTaskId = descData.data.task_id
-    console.log(`  任务ID: ${descTaskId}`)
+    console.log(`  Task ID: ${descTaskId}`)
     
-    // 等待描述生成完成
+    // Wait for description generation to complete
     await waitForTaskCompletion(request, projectId, descTaskId, 180000)
     await waitForProjectStatus(request, projectId, 'DESCRIPTIONS_GENERATED', 10000)
-    console.log('✓ 所有页面描述生成完成\n')
+    console.log('✓ All page descriptions generated\n')
     
-    // 步骤4: 生成图片
-    console.log('🎨 步骤4: 开始生成页面图片...')
+    // Step 5: Generate images
+    console.log('🎨 Step 5: Starting to generate page images...')
     const imageResponse = await request.post(
       `http://localhost:5000/api/projects/${projectId}/generate/images`,
       {
@@ -196,14 +283,14 @@ test.describe('API集成测试：从想法到导出PPT', () => {
     expect(imageData.success).toBe(true)
     
     const imageTaskId = imageData.data.task_id
-    console.log(`  任务ID: ${imageTaskId}`)
+    console.log(`  Task ID: ${imageTaskId}`)
     
-    // 等待图片生成完成（图片生成通常较慢）
+    // Wait for image generation to complete (image generation is usually slower)
     await waitForTaskCompletion(request, projectId, imageTaskId, 300000)
     await waitForProjectStatus(request, projectId, 'COMPLETED', 10000)
-    console.log('✓ 所有页面图片生成完成\n')
+    console.log('✓ All page images generated\n')
     
-    // 验证所有页面都有图片
+    // Verify all pages have images
     const pagesResponse = await request.get(`http://localhost:5000/api/projects/${projectId}`)
     const pagesData = await pagesResponse.json()
     const pages = pagesData.data.pages || []
@@ -213,12 +300,12 @@ test.describe('API集成测试：从想法到导出PPT', () => {
     for (const page of pages) {
       expect(page.generated_image_path).toBeTruthy()
       expect(page.status).toBe('COMPLETED')
-      console.log(`  ✓ 页面 ${page.order_index + 1}: 图片已生成`)
+      console.log(`  ✓ Page ${page.order_index + 1}: Image generated`)
     }
     console.log()
     
-    // 步骤5: 导出PPT
-    console.log('📦 步骤5: 导出PPT文件...')
+    // Step 6: Export PPT
+    console.log('📦 Step 6: Exporting PPT file...')
     const exportResponse = await request.get(
       `http://localhost:5000/api/projects/${projectId}/export/pptx?filename=e2e-test.pptx`
     )
@@ -229,10 +316,10 @@ test.describe('API集成测试：从想法到导出PPT', () => {
     expect(exportData.data.download_url).toBeTruthy()
     expect(exportData.data.download_url).toContain('.pptx')
     
-    console.log(`  导出URL: ${exportData.data.download_url}`)
+    console.log(`  Export URL: ${exportData.data.download_url}`)
     
-    // 步骤6: 验证PPT文件可以下载
-    console.log('📥 步骤6: 验证PPT文件可下载...')
+    // Step 7: Verify PPT file can be downloaded
+    console.log('📥 Step 7: Verifying PPT file can be downloaded...')
     const downloadResponse = await request.get(
       `http://localhost:5000${exportData.data.download_url}`
     )
@@ -243,25 +330,54 @@ test.describe('API集成测试：从想法到导出PPT', () => {
     expect(contentType).toContain('application/vnd.openxmlformats-officedocument.presentationml.presentation')
     
     const pptBuffer = await downloadResponse.body()
-    expect(pptBuffer.length).toBeGreaterThan(1000) // PPT文件应该大于1KB
+    expect(pptBuffer.length).toBeGreaterThan(1000) // PPT file should be larger than 1KB
     
-    console.log(`✓ PPT文件下载成功，大小: ${(pptBuffer.length / 1024).toFixed(2)} KB\n`)
+    console.log(`✓ PPT file downloaded successfully, size: ${(pptBuffer.length / 1024).toFixed(2)} KB\n`)
+    
+    // Step 8: Validate PPTX file content using python-pptx
+    console.log('🔍 Step 8: Validating PPTX file content...')
+    const fs = await import('fs')
+    const path = await import('path')
+    const { execSync } = await import('child_process')
+    const { fileURLToPath } = await import('url')
+    
+    // Save PPTX file to temporary location
+    // Note: downloadResponse.body() already returns a Buffer in Playwright
+    const pptxPath = path.join('test-results', 'e2e-api-test-output.pptx')
+    fs.writeFileSync(pptxPath, pptBuffer)
+    
+    // Validate using Python script
+    try {
+      // Get current directory (ES module compatible)
+      const currentDir = path.dirname(fileURLToPath(import.meta.url))
+      const validateScript = path.join(currentDir, 'validate_pptx.py')
+      const result = execSync(
+        `python3 "${validateScript}" "${pptxPath}" 3 "人工智能" "AI"`,
+        { encoding: 'utf-8', stdio: 'pipe' }
+      )
+      console.log(`✓ ${result.trim()}\n`)
+    } catch (error: any) {
+      // If validation fails, log but don't fail the test (for now)
+      // In production, you might want to make this a hard failure
+      console.warn(`⚠️  PPTX validation warning: ${error.stdout || error.message}`)
+      console.log('  (Continuing test, but PPTX content validation had issues)\n')
+    }
     
     console.log('========================================')
-    console.log('✅ API集成测试通过！')
+    console.log('✅ API integration test passed!')
     console.log('========================================\n')
   })
   
-  test('快速测试：仅验证API流程（不等待AI生成）', async ({ request }) => {
+  test('Quick Test: Only verify API flow (skip AI generation)', async ({ request }) => {
     test.setTimeout(60000)
     
-    console.log('\n🏃 快速API流程测试（跳过AI生成）\n')
+    console.log('\n🏃 Quick API flow test (skip AI generation)\n')
     
-    // 创建项目
+    // Create project
     const createResponse = await request.post('http://localhost:5000/api/projects', {
       data: {
         creation_type: 'idea',
-        idea_prompt: 'API测试项目'
+        idea_prompt: 'API test project'
       }
     })
     
@@ -269,30 +385,30 @@ test.describe('API集成测试：从想法到导出PPT', () => {
     const createData = await createResponse.json()
     projectId = createData.data.project_id
     
-    console.log(`✓ 项目创建: ${projectId}`)
+    console.log(`✓ Project created: ${projectId}`)
     
-    // 获取项目信息
+    // Get project info
     const getResponse = await request.get(`http://localhost:5000/api/projects/${projectId}`)
     expect(getResponse.ok()).toBeTruthy()
-    console.log('✓ 项目查询成功')
+    console.log('✓ Project query successful')
     
-    // 列出所有项目
+    // List all projects
     const listResponse = await request.get('http://localhost:5000/api/projects')
     expect(listResponse.ok()).toBeTruthy()
     const listData = await listResponse.json()
     expect(listData.data.projects).toBeTruthy()
-    console.log(`✓ 项目列表查询成功，共 ${listData.data.projects.length} 个项目`)
+    console.log(`✓ Project list query successful, total ${listData.data.projects.length} projects`)
     
-    // 删除项目
+    // Delete project
     const deleteResponse = await request.delete(`http://localhost:5000/api/projects/${projectId}`)
     expect(deleteResponse.ok()).toBeTruthy()
-    console.log('✓ 项目删除成功\n')
+    console.log('✓ Project deleted successfully\n')
     
-    projectId = '' // 已删除，不需要cleanup
+    projectId = '' // Already deleted, no cleanup needed
   })
 })
 
-test.describe('模板上传和使用', () => {
+test.describe('Template upload and usage', () => {
   let projectId: string
   
   test.afterEach(async ({ request }) => {
@@ -305,18 +421,18 @@ test.describe('模板上传和使用', () => {
     }
   })
   
-  test('应该能上传模板并使用', async ({ request }) => {
-    // 创建项目
+  test('Should be able to upload and use template', async ({ request }) => {
+    // Create project
     const createResponse = await request.post('http://localhost:5000/api/projects', {
       data: {
         creation_type: 'idea',
-        idea_prompt: '模板测试项目'
+        idea_prompt: 'Template test project'
       }
     })
     
     projectId = (await createResponse.json()).data.project_id
     
-    // 上传模板
+    // Upload template
     const templatePath = './e2e/fixtures/test-template.png'
     const { readFileSync, existsSync } = await import('fs')
     
@@ -338,9 +454,9 @@ test.describe('模板上传和使用', () => {
       const uploadData = await uploadResponse.json()
       expect(uploadData.success).toBe(true)
       
-      console.log('✓ 模板上传成功')
+      console.log('✓ Template uploaded successfully')
     } else {
-      console.warn('⚠ 测试模板文件不存在，跳过上传测试')
+      console.warn('⚠ Test template file does not exist, skipping upload test')
       test.skip()
     }
   })

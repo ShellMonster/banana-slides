@@ -87,44 +87,60 @@ fi
 
 # 4. Wait for services to be ready
 log_info "Step 4/10: Waiting for services to be ready (max 60s)..."
-max_wait=60
-waited=0
-backend_ready=false
-frontend_ready=false
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WAIT_SCRIPT="${SCRIPT_DIR}/wait-for-health.sh"
 
-while [ $waited -lt $max_wait ]; do
-    # 检查后端
-    if curl -s http://localhost:5000/health >/dev/null 2>&1; then
-        backend_ready=true
+if [ ! -f "$WAIT_SCRIPT" ]; then
+    log_warning "wait-for-health.sh not found, using fallback method"
+    # Fallback to old method
+    max_wait=60
+    waited=0
+    backend_ready=false
+    frontend_ready=false
+    
+    while [ $waited -lt $max_wait ]; do
+        if curl -s http://localhost:5000/health >/dev/null 2>&1; then
+            backend_ready=true
+        fi
+        if curl -s http://localhost:3000 >/dev/null 2>&1; then
+            frontend_ready=true
+        fi
+        if [ "$backend_ready" = true ] && [ "$frontend_ready" = true ]; then
+            break
+        fi
+        sleep 2
+        waited=$((waited + 2))
+        echo -n "."
+    done
+    echo ""
+    
+    if [ "$backend_ready" = false ] || [ "$frontend_ready" = false ]; then
+        log_error "Services startup timeout"
+        exit 1
+    fi
+    log_success "Services ready (took ${waited}s)"
+else
+    # Use wait-for-health.sh script
+    chmod +x "$WAIT_SCRIPT"
+    
+    log_info "Waiting for backend..."
+    if "$WAIT_SCRIPT" http://localhost:5000/health 60 2; then
+        log_success "Backend is ready"
+    else
+        log_error "Backend startup timeout"
+        docker compose logs backend
+        exit 1
     fi
     
-    # 检查前端
-    if curl -s http://localhost:3000 >/dev/null 2>&1; then
-        frontend_ready=true
+    log_info "Waiting for frontend..."
+    if "$WAIT_SCRIPT" http://localhost:3000 60 2; then
+        log_success "Frontend is ready"
+    else
+        log_error "Frontend startup timeout"
+        docker compose logs frontend
+        exit 1
     fi
-    
-    if [ "$backend_ready" = true ] && [ "$frontend_ready" = true ]; then
-        break
-    fi
-    
-    sleep 2
-    waited=$((waited + 2))
-    echo -n "."
-done
-echo ""
-
-if [ "$backend_ready" = false ] || [ "$frontend_ready" = false ]; then
-    log_error "Services startup timeout"
-    log_info "Viewing container status:"
-    docker compose ps
-    log_info "Viewing backend logs:"
-    docker compose logs backend
-    log_info "Viewing frontend logs:"
-    docker compose logs frontend
-    exit 1
 fi
-
-log_success "Services ready (took ${waited}s)"
 
 # 5. Check container health status
 log_info "Step 5/10: Checking container health status..."

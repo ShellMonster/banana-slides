@@ -1,237 +1,265 @@
-# E2E测试说明
+# E2E 测试说明
 
-## 📚 测试文件分类
+## 📋 测试策略
 
-### 1. 🌐 真正的E2E测试（UI驱动）
-
-**文件**: `ui-full-flow.spec.ts` ✅ 推荐用于发布前验证
-
-**特点**:
-- ✅ 从浏览器UI开始操作
-- ✅ 模拟真实用户行为（点击、输入、等待）
-- ✅ 测试前端 + 后端的完整链路
-- ✅ 发现UI和后端交互的问题
-- ⚠️ 需要10-20分钟运行时间
-- ⚠️ 需要真实AI API密钥
-
-**流程**:
-```
-用户打开浏览器
-  ↓ (page.goto)
-点击"从想法创建"
-  ↓ (page.click)
-输入想法内容
-  ↓ (page.fill)
-点击生成按钮
-  ↓ (等待UI loading)
-看到大纲生成
-  ↓ (page.waitForSelector)
-点击生成描述
-  ↓ (等待UI更新)
-看到描述完成
-  ↓ (page.waitForSelector)
-点击生成图片
-  ↓ (等待UI更新)
-看到图片完成
-  ↓ (page.click)
-点击导出PPT
-  ↓ (page.waitForEvent('download'))
-下载PPT文件
-```
-
-**何时运行**:
-- ✅ 发布前的最终验证
-- ✅ Nightly Build（每晚定时）
-- ❌ 不推荐在PR阶段运行（太慢）
-
----
-
-### 2. 🔌 API集成测试（不是真正的E2E）
-
-**文件**: `api-full-flow.spec.ts`
-
-**特点**:
-- ✅ 直接调用后端API
-- ✅ 跳过前端UI
-- ✅ 更快、更稳定
-- ✅ 测试后端业务逻辑
-- ❌ **不测试前端UI**
-- ❌ **不测试前后端交互**
-
-**流程**:
-```
-直接HTTP POST
-  ↓
-await request.post('/api/projects')
-  ↓
-await request.post('/api/projects/{id}/generate/descriptions')
-  ↓
-await request.post('/api/projects/{id}/generate/images')
-  ↓
-await request.get('/api/projects/{id}/export/pptx')
-```
-
-**何时运行**:
-- ✅ PR的Full Test阶段
-- ✅ 验证后端逻辑正确性
-- ✅ CI中的自动化测试
-
----
-
-### 3. 🎨 基础UI测试
-
-**文件**: `home.spec.ts`, `create-ppt.spec.ts`
-
-**特点**:
-- ✅ 测试基础UI交互
-- ✅ 不依赖真实AI API
-- ✅ 快速（2-5分钟）
-- ❌ 不测试完整流程
-
-**流程**:
-```
-打开首页 → 点击按钮 → 验证导航
-输入内容 → 点击生成 → 验证loading
-```
-
-**何时运行**:
-- ✅ 每次PR（Light Check）
-- ✅ 快速验证UI没有破坏
-
----
-
-## 🎯 测试策略总结
+本项目采用**单一真正的 E2E 测试**策略，避免"伪 E2E"测试造成混淆。
 
 ### 测试金字塔
 
 ```
-        ┌─────────────────┐
-        │  UI驱动E2E测试   │  ← 少量，发布前跑
-        │  (完整用户流程)   │     (ui-full-flow.spec.ts)
-        └─────────────────┘
+        ┌──────────────────┐
+        │   E2E 测试        │  ← 少量，测试完整流程，需要真实 API
+        │  (api-full-flow)  │
+        └──────────────────┘
               ▲
               │
       ┌───────────────────┐
-      │   API集成测试      │  ← 中等，PR Full Test
-      │  (后端验证)        │     (api-full-flow.spec.ts)
+      │   集成测试         │  ← 中等，测试 API 端点，使用 mock
+      │  (backend/tests/)  │
       └───────────────────┘
             ▲
             │
     ┌─────────────────────┐
-    │   基础UI测试         │  ← 大量，PR Light Check
-    │  (UI快速验证)        │     (home.spec.ts, create-ppt.spec.ts)
+    │   单元测试           │  ← 大量，快速，独立
+    │ (前端 + 后端)        │
     └─────────────────────┘
-          ▲
-          │
-  ┌─────────────────────────┐
-  │      单元测试             │  ← 最多，本地开发
-  │ (backend/tests/unit/)    │
-  └─────────────────────────┘
 ```
 
 ---
 
-## 📋 运行指南
+## 🎯 E2E 测试文件
 
-### 本地运行
+### 1. **api-full-flow.spec.ts** ⭐ 主要 E2E 测试
 
-```bash
-# 1. 基础UI测试（快速）
-npx playwright test home.spec.ts create-ppt.spec.ts
+**特点**：
+- ✅ 真正的端到端测试（完整流程）
+- ✅ 使用真实的 AI API（Google Gemini）
+- ✅ 测试从创建到导出的完整链路
+- ✅ 在 CI 中自动运行（如果配置了 API key）
 
-# 2. API集成测试（需要后端运行）
-docker compose up -d
-npx playwright test api-full-flow.spec.ts
-
-# 3. UI驱动E2E测试（需要前端+后端运行）
-# 注意：默认配置已排除此文件，需要明确指定
-docker compose up -d  # 启动后端
-cd frontend && npm run dev  # 启动前端（另一个终端）
-npx playwright test ui-full-flow.spec.ts
-
-# 4. 快速E2E（不等待生成完成）
-npx playwright test ui-full-flow.spec.ts -g "简化版"
-
-# 5. 运行所有测试（包括真正的E2E）
-npx playwright test --grep-invert="简化版"  # 排除快速版本
+**测试流程**：
+```
+1. 创建项目（从想法/大纲/描述）
+   ↓
+2. 等待 AI 生成大纲
+   ↓
+3. 生成页面描述
+   ↓
+4. 生成页面图片
+   ↓
+5. 导出 PPT 文件
 ```
 
-### CI运行策略
+**运行条件**：
+- ⚠️ 需要真实的 `GOOGLE_API_KEY`
+- ⚠️ 需要约 10-15 分钟
+- ⚠️ 会消耗 API 配额（约 $0.01-0.05/次）
+
+**本地运行**：
+```bash
+# 1. 确保 .env 中配置了真实的 GOOGLE_API_KEY
+# 2. 启动服务
+docker compose up -d
+
+# 3. 等待服务就绪（使用智能等待脚本）
+./scripts/wait-for-health.sh http://localhost:5000/health 60 2
+./scripts/wait-for-health.sh http://localhost:3000 60 2
+
+# 4. 运行测试
+npx playwright test api-full-flow.spec.ts --workers=1
+```
+
+**CI 运行**：
+- 自动运行：在 `docker-test` job 中
+- 条件：`GOOGLE_API_KEY` 已在 GitHub Secrets 中配置
+- 跳过：如果没有配置 API key，会跳过并显示说明
+
+---
+
+### 2. **ui-full-flow.spec.ts** 🎨 UI 驱动的完整测试
+
+**特点**：
+- ✅ 从浏览器 UI 开始操作（模拟真实用户）
+- ✅ 测试完整的用户交互流程
+- ✅ 需要真实的 AI API（Google Gemini）
+- ⚠️ 运行时间更长（15-20 分钟）
+- ✅ 在 CI 中自动运行（如果有 API key）
+
+**用途**：
+- 发布前的最终验证
+- 验证真实用户体验
+- CI/CD 完整流程测试
+
+**本地运行**：
+```bash
+# 1. 确保 .env 中配置了真实的 GOOGLE_API_KEY
+# 2. 启动服务
+docker compose up -d
+
+# 3. 等待服务就绪
+./scripts/wait-for-health.sh http://localhost:5000/health 60 2
+./scripts/wait-for-health.sh http://localhost:3000 60 2
+
+# 4. 运行测试
+npx playwright test ui-full-flow.spec.ts --workers=1
+```
+
+**CI 运行**：
+- 自动运行：在 `docker-test` job 中
+- 条件：`GOOGLE_API_KEY` 已在 GitHub Secrets 中配置
+- 跳过：如果没有配置 API key 或是 Fork PR，会跳过并显示说明
+
+---
+
+## 🚫 已删除的测试
+
+以下测试文件已被删除（避免混淆）：
+
+- ~~`home.spec.ts`~~ - 基础 UI 测试（不是真正的 E2E）
+- ~~`create-ppt.spec.ts`~~ - API 集成测试（不是真正的 E2E）
+
+**原因**：
+- 它们不调用真实 AI API，不是真正的端到端测试
+- 测试的内容已被其他测试覆盖：
+  - UI 交互 → 前端单元测试
+  - API 端点 → 后端集成测试
+  - 完整流程 → `api-full-flow.spec.ts`
+
+---
+
+## 🔧 CI 配置
+
+### 在 GitHub Actions 中的运行逻辑
 
 ```yaml
-# PR Light Check (pr-quick-check.yml)
-- home.spec.ts
-- create-ppt.spec.ts (UI部分)
-运行时间: 2-5分钟
+# .github/workflows/ci-test.yml
 
-# PR Full Test (ci-test.yml, ready-for-test标签)
-- api-full-flow.spec.ts (API集成测试)
-运行时间: 15-30分钟
-注意: ui-full-flow.spec.ts 被排除（太慢）
-
-# Nightly Build (nightly-e2e.yml) ✅ 已配置
-- ui-full-flow.spec.ts (UI驱动E2E测试)
-触发: 每天UTC 2:00自动运行，或手动触发
-运行时间: 10-20分钟
+docker-test job:
+  ├─ 构建 Docker 镜像
+  ├─ 启动服务
+  ├─ 健康检查
+  ├─ Docker 环境测试
+  └─ E2E 测试 (api-full-flow.spec.ts)
+      ├─ 如果有 GOOGLE_API_KEY → 运行完整 E2E
+      └─ 如果没有 API key → 跳过，显示说明
 ```
 
-**重要**：
-- ✅ `ui-full-flow.spec.ts` **不会**在PR阶段自动运行
-- ✅ 默认Playwright配置已排除此文件（避免误运行）
-- ✅ 只在Nightly Build或手动触发时运行
+### 配置 GitHub Secrets
+
+要在 CI 中运行 E2E 测试，需要配置：
+
+1. 进入仓库 → **Settings** → **Secrets and variables** → **Actions**
+2. 添加 Secret：
+   - Name: `GOOGLE_API_KEY`
+   - Value: 你的 Google Gemini API 密钥
+   - 获取地址：https://aistudio.google.com/app/apikey
+
+### 如果没有配置 API key
+
+CI 会跳过 E2E 测试，并显示：
+
+```
+⚠️  Skipping E2E tests
+
+Reason: GOOGLE_API_KEY not configured or using mock key
+
+Note: Other tests already passed:
+  ✅ Backend unit tests
+  ✅ Backend integration tests (with mock AI)
+  ✅ Frontend unit tests
+  ✅ Docker environment tests
+
+E2E tests require a real Google API key to test the complete AI generation workflow.
+```
+
+**这是正常的！** 其他测试已经覆盖了大部分功能。
 
 ---
 
-## 🤔 常见问题
+## 📊 测试覆盖范围
 
-### Q: 为什么不在PR阶段跑真正的E2E？
-
-**A**: 
-1. 太慢（10-20分钟），影响开发效率
-2. 依赖UI稳定性，开发中UI经常变动
-3. 成本高（真实AI调用）
-4. API集成测试已经覆盖了业务逻辑
-
-### Q: 什么时候必须跑真正的E2E？
-
-**A**:
-1. **发布前** - 确保用户完整流程能用
-2. **重大功能上线前** - 验证关键路径
-3. **定期验证（Nightly）** - 防止积累问题
-4. **修复UI bug后** - 确保没有其他UI问题
-
-### Q: `api-full-flow.spec.ts`有什么用？
-
-**A**:
-虽然不是真正的E2E，但它：
-- ✅ 快速验证后端业务逻辑
-- ✅ 不依赖UI变化，更稳定
-- ✅ 适合CI自动化
-- ✅ 发现后端问题
-
-是**开发阶段的主要测试手段**。
-
-### Q: 我该如何选择？
-
-**A**:
-
-| 场景 | 推荐测试 |
-|------|---------|
-| 本地开发 | 单元测试 |
-| 提交PR | 基础UI测试 |
-| 合并前 | API集成测试 |
-| 发布前 | **真正的E2E测试** ✅ |
-| 定期验证 | 真正的E2E测试 |
+| 测试层级 | 测试内容 | 需要真实 API | 运行时间 | CI 运行 |
+|---------|---------|-------------|---------|---------|
+| **前端单元测试** | React 组件、hooks、工具函数 | ❌ | < 1 分钟 | ✅ 总是 |
+| **后端单元测试** | Services、Utils、Models | ❌ | < 2 分钟 | ✅ 总是 |
+| **后端集成测试** | API 端点（mock AI） | ❌ | < 3 分钟 | ✅ 总是 |
+| **Docker 环境测试** | 容器启动、健康检查 | ❌ | < 5 分钟 | ✅ 总是 |
+| **E2E 测试** | 完整 AI 生成流程 | ✅ | 10-15 分钟 | ⚠️ 有 API key 时 |
 
 ---
 
-## 📚 参考资料
+## 🎯 最佳实践
 
-- [Playwright官方文档](https://playwright.dev)
-- [测试金字塔](https://martinfowler.com/articles/practical-test-pyramid.html)
-- [E2E vs Integration Testing](https://kentcdodds.com/blog/write-tests)
+### 开发时
+
+1. **日常开发**：运行单元测试和集成测试
+   ```bash
+   # 后端
+   cd backend && uv run pytest tests/
+   
+   # 前端
+   cd frontend && npm test
+   ```
+
+2. **提交 PR 前**：确保 CI 的所有测试通过
+   - Light Check（自动运行）
+   - Full Test（添加 `ready-for-test` 标签触发）
+
+3. **大功能完成后**：本地运行一次 E2E 测试
+   ```bash
+   # 确保 .env 配置了真实 API key
+   npx playwright test api-full-flow.spec.ts
+   ```
+
+### 发布前
+
+1. **最终验证**：运行完整的 UI E2E 测试
+   ```bash
+   npx playwright test ui-full-flow.spec.ts
+   ```
+
+2. **检查 CI**：确保所有测试（包括 E2E）都通过
 
 ---
 
-**最后更新**: 2025-01-20
+## 🐛 调试失败的测试
 
+### 查看测试报告
+
+```bash
+# 运行测试后，打开 HTML 报告
+npx playwright show-report
+```
+
+### 查看失败截图和视频
+
+测试失败时，Playwright 会自动保存：
+- 截图：`test-results/**/test-failed-*.png`
+- 视频：`test-results/**/video.webm`
+- 追踪：`test-results/**/trace.zip`
+
+### 查看追踪
+
+```bash
+npx playwright show-trace test-results/**/trace.zip
+```
+
+### UI 模式调试
+
+```bash
+# 在 UI 模式下运行测试（可以看到浏览器操作过程）
+npx playwright test --ui
+```
+
+---
+
+## 📚 相关文档
+
+- [Playwright 文档](https://playwright.dev)
+- [CI 配置说明](../.github/CI_SETUP.md)
+- [项目 README](../README.md)
+
+---
+
+**最后更新**: 2025-12-22  
+**测试策略**: 单一真正的 E2E 测试
