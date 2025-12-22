@@ -39,6 +39,7 @@
 !.github/**/*.md
 *.pyc
 .env
+.env.detected
 *.ppt
 *.pptx
 generate-example.py

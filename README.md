@@ -177,19 +177,36 @@ OPENAI_API_BASE=https://api.openai.com/v1
 ...
 ```
 
-2. **启动服务**
+2. **配置镜像源加速（中国用户推荐）**
+
+如果你在中国大陆，建议运行以下脚本自动配置国内镜像源，可大幅提升 Docker 构建速度：
+
+```bash
+bash setup-mirrors.sh
+```
+
+脚本会自动检测你的 IP 所在地区，并生成对应的镜像源配置。你也可以手动指定：
+
+```bash
+bash setup-mirrors.sh cn       # 强制使用中国源
+bash setup-mirrors.sh global   # 强制使用国外源
+```
+
+> **提示**：如需进一步加速基础镜像（python:3.10-slim, node:18-alpine）的下载，可在本机配置 Docker Hub 镜像加速器，详见脚本运行后的提示信息。
+
+3. **启动服务**
 
 ```bash
 docker compose up -d
 ```
 
-3. **访问应用**
+4. **访问应用**
 
 - 前端：http://localhost:3000
 - 后端 API：http://localhost:5000
 
 
-4. **查看日志**
+5. **查看日志**
 
 ```bash
 # 查看后端日志（实时查看最后50行）
@@ -202,13 +219,13 @@ sudo docker compose logs -f --tail 50
 sudo docker compose logs -f --tail 50 frontend
 ```
 
-5. **停止服务**
+6. **停止服务**
 
 ```bash
 docker compose down
 ```
 
-6. **更新项目**
+7. **更新项目**
 
 拉取最新代码并重新构建和启动服务：
 
