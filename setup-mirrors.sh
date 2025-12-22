@@ -61,9 +61,9 @@ show_help() {
 # ============================================================================
 # IP 地区检测函数
 # ============================================================================
+# 返回值：CN 或 GLOBAL（通过 echo 输出）
+# 注意：此函数只输出结果，不打印日志（避免污染返回值）
 detect_region() {
-    log_info "检测当前 IP 所在地区..."
-
     # 方法1：使用 ipinfo.io API（最可靠）
     if command -v curl &> /dev/null; then
         local response
@@ -75,11 +75,9 @@ detect_region() {
             country=$(echo "$response" | grep -o '"country":"[^"]*' | cut -d'"' -f4)
 
             if [ "$country" = "CN" ]; then
-                log_info "检测到 IP 地区: 中国 (CN)"
                 echo "CN"
                 return 0
             elif [ -n "$country" ]; then
-                log_info "检测到 IP 地区: $country"
                 echo "GLOBAL"
                 return 0
             fi
@@ -89,14 +87,12 @@ detect_region() {
     # 方法2：尝试访问中国镜像源测试连通性
     if command -v curl &> /dev/null; then
         if curl -s --max-time 3 "https://mirrors.aliyun.com" &>/dev/null; then
-            log_info "检测到可访问中国镜像源，使用中国源"
             echo "CN"
             return 0
         fi
     fi
 
     # 方法3：默认使用中国源（项目主要用户在中国）
-    log_warning "无法检测 IP 地区，默认使用中国源"
     echo "CN"
 }
 
@@ -274,7 +270,13 @@ main() {
             ;;
         "")
             # 自动检测
+            log_info "检测当前 IP 所在地区..."
             region=$(detect_region)
+            if [ "$region" = "CN" ]; then
+                log_info "检测到 IP 地区: 中国 (CN)"
+            else
+                log_info "检测到 IP 地区: 国外"
+            fi
             ;;
         *)
             log_error "未知参数: $1"
