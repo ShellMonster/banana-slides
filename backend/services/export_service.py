@@ -130,7 +130,7 @@ class ExportService:
             return pptx_bytes.getvalue()
     
     @staticmethod
-    def create_pdf_from_images(image_paths: List[str], output_file: str = None) -> bytes:
+    def create_pdf_from_images(image_paths: List[str], output_file: str = None) -> Optional[bytes]:
         """
         Create PDF file from image paths using img2pdf (low memory usage)
 
@@ -139,32 +139,42 @@ class ExportService:
             output_file: Optional output file path (if None, returns bytes)
 
         Returns:
-            PDF file as bytes if output_file is None
+            PDF file as bytes if output_file is None, otherwise None
         """
-        # Validate images exist
-        valid_paths = [p for p in image_paths if os.path.exists(p)]
+        # Validate images exist and log warnings for missing files
+        valid_paths = []
+        for p in image_paths:
+            if os.path.exists(p):
+                valid_paths.append(p)
+            else:
+                logger.warning(f"Image not found and will be skipped for PDF export: {p}")
+
         if not valid_paths:
             raise ValueError("No valid images found for PDF export")
 
-        logger.info(f"Using img2pdf for PDF export ({len(valid_paths)} pages, low memory mode)")
+        try:
+            logger.info(f"Using img2pdf for PDF export ({len(valid_paths)} pages, low memory mode)")
 
-        # Set page layout: 16:9 aspect ratio (10 inches × 5.625 inches)
-        layout_fun = img2pdf.get_layout_fun(
-            pagesize=(img2pdf.in_to_pt(10), img2pdf.in_to_pt(5.625))
-        )
+            # Set page layout: 16:9 aspect ratio (10 inches × 5.625 inches)
+            layout_fun = img2pdf.get_layout_fun(
+                pagesize=(img2pdf.in_to_pt(10), img2pdf.in_to_pt(5.625))
+            )
 
-        # Convert images to PDF
-        pdf_bytes = img2pdf.convert(valid_paths, layout_fun=layout_fun)
+            # Convert images to PDF
+            pdf_bytes = img2pdf.convert(valid_paths, layout_fun=layout_fun)
 
-        if output_file:
-            with open(output_file, "wb") as f:
-                f.write(pdf_bytes)
-            return None
-        else:
-            return pdf_bytes
+            if output_file:
+                with open(output_file, "wb") as f:
+                    f.write(pdf_bytes)
+                return None
+            else:
+                return pdf_bytes
+        except Exception as e:
+            logger.warning(f"img2pdf conversion failed: {e}. Falling back to Pillow (high memory usage).")
+            return ExportService.create_pdf_from_images_pillow(image_paths, output_file)
 
     @staticmethod
-    def create_pdf_from_images_pillow(image_paths: List[str], output_file: str = None) -> bytes:
+    def create_pdf_from_images_pillow(image_paths: List[str], output_file: str = None) -> Optional[bytes]:
         """
         Create PDF file from image paths using Pillow (original method)
 
@@ -176,7 +186,7 @@ class ExportService:
             output_file: Optional output file path (if None, returns bytes)
 
         Returns:
-            PDF file as bytes if output_file is None
+            PDF file as bytes if output_file is None, otherwise None
         """
         images = []
 
