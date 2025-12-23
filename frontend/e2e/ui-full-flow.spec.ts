@@ -3,14 +3,14 @@
  * 
  * This test simulates the complete user operation flow in the browser:
  * 1. Enter idea in frontend
- * 2. Click "Next" button
+ * 2. Click "下一步" (Next) button
  * 3. Click batch generate outline button on outline editor page
  * 4. Wait for outline generation (visible in UI)
- * 5. Click "Next" to go to description editor page
+ * 5. Click "下一步" (Next) to go to description editor page
  * 6. Click batch generate descriptions button
  * 7. Wait for descriptions to generate (visible in UI)
  * 8. Test retry single card functionality
- * 9. Click "Next" to go to image generation page
+ * 9. Click "生成图片" (Generate Images) to go to image generation page
  * 10. Click batch generate images button
  * 11. Wait for images to generate (visible in UI)
  * 12. Export PPT
@@ -68,7 +68,10 @@ test.describe('UI-driven E2E test: From user interface to PPT export', () => {
     
     console.log('🚀 Clicking "Next" button...')
     await page.click('button:has-text("下一步")')
-    console.log('✓ Clicked "Next" button\n')
+    
+    // Wait for navigation to outline editor page
+    await page.waitForURL(/\/project\/.*\/outline/, { timeout: 10000 })
+    console.log('✓ Clicked "Next" button and navigated to outline editor page\n')
     
     // ====================================
     // Step 4: Click batch generate outline button on outline editor page
@@ -115,8 +118,10 @@ test.describe('UI-driven E2E test: From user interface to PPT export', () => {
     const nextBtn = page.locator('button:has-text("下一步")')
     if (await nextBtn.count() > 0) {
       await nextBtn.first().click()
-      await page.waitForTimeout(1000) // Wait for page transition
-      console.log('✓ Clicked "Next" button\n')
+      
+      // Wait for navigation to detail editor page
+      await page.waitForURL(/\/project\/.*\/detail/, { timeout: 10000 })
+      console.log('✓ Clicked "Next" button and navigated to description editor page\n')
     }
     
     // ====================================
@@ -163,6 +168,24 @@ test.describe('UI-driven E2E test: From user interface to PPT export', () => {
       await retryButtons.first().click()
       console.log('✓ Clicked retry button on first card')
       
+      // Handle confirmation dialog if it appears (appears when page already has description)
+      try {
+        const confirmDialog = page.locator('div[role="dialog"]:has-text("确认重新生成")')
+        await confirmDialog.waitFor({ state: 'visible', timeout: 2000 })
+        console.log('  Confirmation dialog appeared, clicking confirm...')
+        
+        // Click the confirm button in the dialog
+        const confirmButton = page.locator('button:has-text("确定"), button:has-text("确认")').last()
+        await confirmButton.click()
+        
+        // Wait for dialog to be completely hidden
+        await confirmDialog.waitFor({ state: 'hidden', timeout: 5000 })
+        console.log('  Confirmed regeneration and dialog closed')
+      } catch (e) {
+        // Dialog didn't appear or already closed, continue
+        console.log('  No confirmation dialog, continuing...')
+      }
+      
       // Wait for the card to show generating state
       await page.waitForSelector('button:has-text("生成中...")', { timeout: 5000 }).catch(() => {
         // If "生成中..." doesn't appear, check for other loading indicators
@@ -182,25 +205,45 @@ test.describe('UI-driven E2E test: From user interface to PPT export', () => {
     }
     
     // ====================================
-    // Step 10: Click "Next" to go to image generation page
+    // Step 10: Click "生成图片" to go to image generation page
     // ====================================
-    console.log('➡️  Step 10: Clicking "Next" to go to image generation page...')
-    const nextBtn2 = page.locator('button:has-text("下一步")')
-    if (await nextBtn2.count() > 0) {
-      await nextBtn2.first().click()
-      await page.waitForTimeout(1000) // Wait for page transition
-      console.log('✓ Clicked "Next" button\n')
+    console.log('➡️  Step 10: Clicking "生成图片" to go to image generation page...')
+    
+    // First, ensure no modal/dialog is blocking the UI
+    try {
+      const modalOverlay = page.locator('div[role="dialog"]')
+      const modalVisible = await modalOverlay.isVisible().catch(() => false)
+      if (modalVisible) {
+        console.log('  Detected open modal, closing it...')
+        // Try to close modal by pressing Escape or clicking close button
+        await page.keyboard.press('Escape')
+        await modalOverlay.waitFor({ state: 'hidden', timeout: 3000 })
+        console.log('  Modal closed')
+      }
+    } catch (e) {
+      // No modal or already closed
     }
+    
+    const generateImagesNavBtn = page.locator('button:has-text("生成图片")')
+    
+    // Wait for button to be enabled (it's disabled until all descriptions are generated)
+    await generateImagesNavBtn.waitFor({ state: 'visible', timeout: 10000 })
+    await expect(generateImagesNavBtn).toBeEnabled({ timeout: 5000 })
+    
+    await generateImagesNavBtn.first().click()
+    
+    // Wait for navigation to preview page
+    await page.waitForURL(/\/project\/.*\/preview/, { timeout: 10000 })
+    console.log('✓ Clicked "生成图片" button and navigated to preview page\n')
     
     // ====================================
     // Step 11: Click batch generate images button
     // ====================================
     console.log('🎨 Step 11: Clicking batch generate images button...')
     
-    // Wait for image generation page to load
-    await page.waitForSelector('button:has-text("批量生成图片")', { timeout: 10000 })
-    
-    const generateImageBtn = page.locator('button:has-text("批量生成图片")')
+    // Wait for image generation page to load (button text includes page count like "批量生成图片 (3)")
+    const generateImageBtn = page.locator('button').filter({ hasText: '批量生成图片' })
+    await generateImageBtn.waitFor({ state: 'visible', timeout: 10000 })
     
     if (await generateImageBtn.count() > 0) {
       await generateImageBtn.first().click()
@@ -209,20 +252,26 @@ test.describe('UI-driven E2E test: From user interface to PPT export', () => {
       // Wait for images to generate (may take 3-8 minutes)
       console.log('⏳ Step 12: Waiting for images to generate (may take 3-8 minutes)...')
       
-      // Smart wait: Use expect().toPass() for retry polling
+      // Smart wait: Wait for export button to be enabled, which indicates all images are generated
+      // This is more reliable than checking individual image elements
+      const exportBtnCheck = page.locator('button:has-text("导出")')
+      await expect(exportBtnCheck).toBeEnabled({ timeout: 480000 })
+      
+      // Also verify that images are actually visible in the UI
       await expect(async () => {
-        const completedImages = page.locator('[data-status="completed"], .all-images-complete, img[src*="generated"]:not([src=""])')
-        const count = await completedImages.count()
+        // Check for images in the preview area
+        const images = page.locator('img[src*="generated"], img[src*="image"]')
+        const count = await images.count()
         if (count === 0) {
-          throw new Error('Images not yet generated')
+          throw new Error('Images not yet visible in UI')
         }
         expect(count).toBeGreaterThan(0)
-      }).toPass({ timeout: 480000, intervals: [5000, 10000, 15000] })
+      }).toPass({ timeout: 10000, intervals: [1000, 2000] })
       
       console.log('✓ All images generated\n')
       await page.screenshot({ path: 'test-results/e2e-images-generated.png' })
     } else {
-      console.log('⚠️  Batch generate images button not found\n')
+      throw new Error('Batch generate images button not found')
     }
     
     // ====================================
@@ -233,54 +282,58 @@ test.describe('UI-driven E2E test: From user interface to PPT export', () => {
     // Setup download handler
     const downloadPromise = page.waitForEvent('download', { timeout: 60000 })
     
-    // Click export button
-    const exportBtn = page.locator('button:has-text("导出"), button:has-text("下载"), button:has-text("完成")')
+    // Step 1: Wait for export button to be enabled (it's disabled until all images are generated)
+    const exportBtn = page.locator('button:has-text("导出")')
+    await exportBtn.waitFor({ state: 'visible', timeout: 10000 })
+    await expect(exportBtn).toBeEnabled({ timeout: 5000 })
     
-    if (await exportBtn.count() > 0) {
-      await exportBtn.first().click()
-      console.log('✓ Clicked export button\n')
-      
-      // Wait for download to complete
-      console.log('⏳ Waiting for PPT file download...')
-      const download = await downloadPromise
-      
-      // Save file
-      const downloadPath = path.join('test-results', 'e2e-test-output.pptx')
-      await download.saveAs(downloadPath)
-      
-      // Verify file exists and is not empty
-      const fileExists = fs.existsSync(downloadPath)
-      expect(fileExists).toBeTruthy()
-      
-      const fileStats = fs.statSync(downloadPath)
-      expect(fileStats.size).toBeGreaterThan(1000) // At least 1KB
-      
-      console.log(`✓ PPT file downloaded successfully!`)
-      console.log(`  Path: ${downloadPath}`)
-      console.log(`  Size: ${(fileStats.size / 1024).toFixed(2)} KB\n`)
-      
-      // Validate PPTX file content using python-pptx
-      console.log('🔍 Validating PPTX file content...')
-      const { execSync } = await import('child_process')
-      const { fileURLToPath } = await import('url')
-      try {
-        // Get current directory (ES module compatible)
-        const currentDir = path.dirname(fileURLToPath(import.meta.url))
-        const validateScript = path.join(currentDir, 'validate_pptx.py')
-        const result = execSync(
-          `python3 "${validateScript}" "${downloadPath}" 3 "人工智能" "AI"`,
-          { encoding: 'utf-8', stdio: 'pipe' }
-        )
-        console.log(`✓ ${result.trim()}\n`)
-      } catch (error: any) {
-        console.warn(`⚠️  PPTX validation warning: ${error.stdout || error.message}`)
-        console.log('  (Continuing test, but PPTX content validation had issues)\n')
-      }
-    } else {
-      console.log('⚠️  Export button not found, trying other methods...')
-      
-      // Try exporting via right-click menu or other UI elements
-      // (Adjust based on actual UI implementation)
+    await exportBtn.first().click()
+    console.log('✓ Clicked export button, opening menu...')
+    
+    // Wait for dropdown menu to appear
+    await page.waitForTimeout(500)
+    
+    // Step 2: Click "导出为 PPTX" in the dropdown menu
+    const exportPptxBtn = page.locator('button:has-text("导出为 PPTX")')
+    await exportPptxBtn.waitFor({ state: 'visible', timeout: 5000 })
+    await exportPptxBtn.click()
+    console.log('✓ Clicked "导出为 PPTX" button\n')
+    
+    // Wait for download to complete
+    console.log('⏳ Waiting for PPT file download...')
+    const download = await downloadPromise
+    
+    // Save file
+    const downloadPath = path.join('test-results', 'e2e-test-output.pptx')
+    await download.saveAs(downloadPath)
+    
+    // Verify file exists and is not empty
+    const fileExists = fs.existsSync(downloadPath)
+    expect(fileExists).toBeTruthy()
+    
+    const fileStats = fs.statSync(downloadPath)
+    expect(fileStats.size).toBeGreaterThan(1000) // At least 1KB
+    
+    console.log(`✓ PPT file downloaded successfully!`)
+    console.log(`  Path: ${downloadPath}`)
+    console.log(`  Size: ${(fileStats.size / 1024).toFixed(2)} KB\n`)
+    
+    // Validate PPTX file content using python-pptx
+    console.log('🔍 Validating PPTX file content...')
+    const { execSync } = await import('child_process')
+    const { fileURLToPath } = await import('url')
+    try {
+      // Get current directory (ES module compatible)
+      const currentDir = path.dirname(fileURLToPath(import.meta.url))
+      const validateScript = path.join(currentDir, 'validate_pptx.py')
+      const result = execSync(
+        `python3 "${validateScript}" "${downloadPath}" 3 "人工智能" "AI"`,
+        { encoding: 'utf-8', stdio: 'pipe' }
+      )
+      console.log(`✓ ${result.trim()}\n`)
+    } catch (error: any) {
+      console.warn(`⚠️  PPTX validation warning: ${error.stdout || error.message}`)
+      console.log('  (Continuing test, but PPTX content validation had issues)\n')
     }
     
     // ====================================
