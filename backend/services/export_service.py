@@ -169,9 +169,9 @@ class ExportService:
                 return None
             else:
                 return pdf_bytes
-        except Exception as e:
+        except (img2pdf.ImageOpenError, ValueError, IOError) as e:
             logger.warning(f"img2pdf conversion failed: {e}. Falling back to Pillow (high memory usage).")
-            return ExportService.create_pdf_from_images_pillow(image_paths, output_file)
+            return ExportService.create_pdf_from_images_pillow(valid_paths, output_file)
 
     @staticmethod
     def create_pdf_from_images_pillow(image_paths: List[str], output_file: str = None) -> Optional[bytes]:
