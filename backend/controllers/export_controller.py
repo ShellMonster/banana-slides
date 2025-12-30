@@ -5,6 +5,7 @@ from flask import Blueprint, request, current_app
 from models import db, Project, Page
 from utils import error_response, not_found, bad_request, success_response
 from services import ExportService, FileService
+from services.ai_service_manager import get_ai_service
 import os
 import io
 
@@ -221,11 +222,10 @@ def export_editable_pptx(project_id):
         
         # Get services
         from services.file_service import FileService
-        from services.ai_service import AIService
         from services.task_manager import task_manager, export_editable_pptx_task
         
         file_service = FileService(current_app.config['UPLOAD_FOLDER'])
-        ai_service = AIService()
+        ai_service = get_ai_service()
         
         # Get configuration
         aspect_ratio = current_app.config.get('DEFAULT_ASPECT_RATIO', '16:9')
