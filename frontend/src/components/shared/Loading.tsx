@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { ArrowLeft } from 'lucide-react';
 import { cn } from '@/utils';
 
 interface ProgressData {
@@ -13,12 +14,18 @@ interface LoadingProps {
   fullscreen?: boolean;
   message?: string;
   progress?: ProgressData;
+  /** Callback when user clicks "Run in Background" button */
+  onBackgroundClick?: () => void;
+  /** Label for the background button */
+  backgroundButtonLabel?: string;
 }
 
 export const Loading: React.FC<LoadingProps> = ({
   fullscreen = false,
   message = '加载中...',
   progress,
+  onBackgroundClick,
+  backgroundButtonLabel = '在后台执行',
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
@@ -54,10 +61,7 @@ export const Loading: React.FC<LoadingProps> = ({
       {/* 进度条 */}
       {progress && (
         <div className="w-full">
-          <div className="flex justify-between text-sm text-gray-600 mb-2">
-            <span className="truncate max-w-[70%]">
-              {progress.current_step || `已完成 ${progress.completed}/${progress.total}`}
-            </span>
+          <div className="flex justify-end text-sm text-gray-600 mb-2">
             <span className="font-medium">{percent}%</span>
           </div>
           <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
@@ -72,18 +76,18 @@ export const Loading: React.FC<LoadingProps> = ({
       {/* 滚动消息日志 */}
       {hasMessages && (
         <div className="w-full mt-4">
-          <div className="bg-gray-900 rounded-lg p-3 h-32 overflow-y-auto font-mono text-xs">
+          <div className="bg-banana-50 border border-banana-200 rounded-lg p-3 h-32 overflow-y-auto text-xs">
             {progress.messages!.map((msg, index) => (
               <div 
                 key={index} 
                 className={cn(
                   "py-0.5",
                   index === progress.messages!.length - 1 
-                    ? "text-banana-400" 
-                    : "text-gray-400"
+                    ? "text-banana-700 font-medium" 
+                    : "text-gray-500"
                 )}
               >
-                <span className="text-gray-600 mr-2">›</span>
+                <span className="text-banana-400 mr-2">›</span>
                 {msg}
               </div>
             ))}
@@ -97,6 +101,16 @@ export const Loading: React.FC<LoadingProps> = ({
   if (fullscreen) {
     return (
       <div className="fixed inset-0 bg-white/90 backdrop-blur-sm flex items-center justify-center z-50">
+        {/* Background button - top left corner */}
+        {onBackgroundClick && (
+          <button
+            onClick={onBackgroundClick}
+            className="absolute top-4 left-4 flex items-center gap-2 px-4 py-2 text-sm text-gray-600 hover:text-banana-600 bg-white/80 hover:bg-banana-50 rounded-lg border border-gray-200 shadow-sm transition-colors"
+          >
+            <ArrowLeft size={16} />
+            {backgroundButtonLabel}
+          </button>
+        )}
         {content}
       </div>
     );
