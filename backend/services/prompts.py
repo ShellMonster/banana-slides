@@ -147,6 +147,7 @@ You can organize the content in two ways:
 ]
 
 Choose the format that best fits the content. Use parts when the PPT has clear major sections.
+Unless otherwise specified, the first page should be kept simplest, containing only the title, subtitle, and presenter information.
 
 The user's request: {idea_prompt}. Now generate the outline, don't include any other text.
 {get_language_instruction(language)}
@@ -255,6 +256,7 @@ def get_page_description_prompt(project_context: 'ProjectContext', outline: list
 我们已经有了完整的大纲：\n{outline}\n{part_info}
 现在请为第 {page_index} 页生成描述：
 {page_outline}
+{"**除非特殊要求，第一页的内容需要保持极简，只放标题副标题以及演讲人等（输出到标题后）, 不添加任何素材。**" if page_index == 1 else ""}
 
 【重要提示】生成的"页面文字"部分会直接渲染到PPT页面上，因此请务必注意：
 1. 文字内容要简洁精炼，每条要点控制在15-25字以内
@@ -265,6 +267,7 @@ def get_page_description_prompt(project_context: 'ProjectContext', outline: list
 
 输出格式示例：
 页面标题：原始社会：与自然共生
+{"副标题：人类祖先和自然的相处之道" if page_index == 1 else ""}
 
 页面文字：
 - 狩猎采集文明：人类活动规模小，对环境影响有限
@@ -272,7 +275,7 @@ def get_page_description_prompt(project_context: 'ProjectContext', outline: list
 - 适应而非改造：通过观察学习自然，发展生存技能
 - 影响特点：局部、短期、低强度，生态可自我恢复
 
-其他页面素材（如果有请积极添加，包括markdown图片链接、公式、表格等）
+其他页面素材（如果文件中存在请积极添加，包括markdown图片链接、公式、表格等）
 
 【关于图片】如果参考文件中包含以 /files/ 开头的本地文件URL图片（例如 /files/mineru/xxx/image.png），请将这些图片以markdown格式输出，例如：![图片描述](/files/mineru/xxx/image.png)。这些图片会被包含在PPT页面中。
 
@@ -288,7 +291,9 @@ def get_image_generation_prompt(page_desc: str, outline_text: str,
                                 current_section: str,
                                 has_material_images: bool = False,
                                 extra_requirements: str = None,
-                                language: str = None) -> str:
+                                language: str = None,
+                                has_template: bool = True,
+                                page_index: int = 1) -> str:
     """
     生成图片生成 prompt
     
@@ -297,7 +302,9 @@ def get_image_generation_prompt(page_desc: str, outline_text: str,
         outline_text: 大纲文本
         current_section: 当前章节
         has_material_images: 是否有素材图片
-        extra_requirements: 额外的要求
+        extra_requirements: 额外的要求（可能包含风格描述）
+        language: 输出语言
+        has_template: 是否有模板图片（False表示无模板图模式）
         
     Returns:
         格式化后的 prompt 字符串
@@ -306,7 +313,7 @@ def get_image_generation_prompt(page_desc: str, outline_text: str,
     material_images_note = ""
     if has_material_images:
         material_images_note = (
-            "\n\n提示：除了模板参考图片（用于风格参考）外，还提供了额外的素材图片。"
+            "\n\n提示：" + ("除了模板参考图片（用于风格参考）外，还提供了额外的素材图片。" if has_template else "用户提供了额外的素材图片。") +
             "这些素材图片是可供挑选和使用的元素，你可以从这些素材图片中选择合适的图片、图标、图表或其他视觉元素"
             "直接整合到生成的PPT页面中。请根据页面内容的需要，智能地选择和组合这些素材图片中的元素。"
         )
@@ -316,7 +323,11 @@ def get_image_generation_prompt(page_desc: str, outline_text: str,
     if extra_requirements and extra_requirements.strip():
         extra_req_text = f"\n\n额外要求（请务必遵循）：\n{extra_requirements}\n"
 
-# 该处参考了@歸藏的A工具箱
+    # 根据是否有模板生成不同的设计指南内容（保持原prompt要点顺序）
+    template_style_guideline = "- 配色和设计语言和模板图片严格相似。" if has_template else "- 严格按照风格描述进行设计。"
+    forbidden_template_text_guidline = "- 只参考风格设计，禁止出现模板中的文字。\n" if has_template else ""
+
+    # 该处参考了@歸藏的A工具箱
     prompt = (f"""\
 你是一位专家级UI UX演示设计师，专注于生成设计良好的PPT页面。
 当前PPT页面的页面描述如下:
@@ -334,14 +345,15 @@ def get_image_generation_prompt(page_desc: str, outline_text: str,
 
 <design_guidelines>
 - 要求文字清晰锐利, 画面为4K分辨率，16:9比例。
-- 配色和设计语言和模板图片严格相似。
+{template_style_guideline}
 - 根据内容自动设计最完美的构图，不重不漏地渲染"页面描述"中的文本。
 - 如非必要，禁止出现 markdown 格式符号（如 # 和 * 等）。
-- 只参考风格设计，禁止出现模板中的文字。
-- 使用大小恰当的装饰性图形或插画对空缺位置进行填补。
+{forbidden_template_text_guidline}- 使用大小恰当的装饰性图形或插画对空缺位置进行填补。
 </design_guidelines>
 {get_ppt_language_instruction(language)}
 {material_images_note}{extra_req_text}
+
+{"**注意：当前页面为ppt的封面页，请你采用专业的封面设计美学技巧，务必凸显出页面标题，分清主次，确保一下就能抓住观众的注意力。**" if page_index == 1 else ""}
 """)
     
     logger.debug(f"[get_image_generation_prompt] Final prompt:\n{prompt}")
@@ -704,3 +716,185 @@ You are a helpful assistant that modifies PPT page descriptions based on user re
     final_prompt = files_xml + prompt
     logger.debug(f"[get_descriptions_refinement_prompt] Final prompt:\n{final_prompt}")
     return final_prompt
+
+
+def get_clean_background_prompt() -> str:
+    """
+    生成纯背景图的 prompt（去除文字和插画）
+    用于从完整的PPT页面中提取纯背景
+    """
+    prompt = """\
+你是一位专业的图片文字&图片擦除专家。你的任务是从原始图片中移除文字和配图，输出一张无任何文字和图表内容、干净纯净的底板图。
+<requirements>
+- 彻底移除页面中的所有文字、插画、图表。必须确保所有文字都被完全去除。
+- 保持原背景设计的完整性（包括渐变、纹理、图案、线条、色块等）。保留原图的文本框和色块。
+- 对于被前景元素遮挡的背景区域，要智能填补，使背景保持无缝和完整，就像被移除的元素从来没有出现过。
+- 输出图片的尺寸、风格、配色必须和原图完全一致。
+- 请勿新增任何元素。
+</requirements>
+
+注意，**任意位置的, 所有的**文字和图表都应该被彻底移除，**输出不应该包含任何文字和图表。**
+"""
+    logger.debug(f"[get_clean_background_prompt] Final prompt:\n{prompt}")
+    return prompt
+
+
+def get_text_attribute_extraction_prompt(content_hint: str = "") -> str:
+    """
+    生成文字属性提取的 prompt
+    
+    Args:
+        content_hint: 文字内容提示，如果提供则会在prompt中包含文字内容信息
+    
+    Returns:
+        格式化后的 prompt 字符串
+    """
+    prompt = """分析这张图片中的文字样式，返回JSON格式的结果。
+
+{content_hint}
+
+请分析图片中的文字并返回以下属性：
+1. font_color: 字体颜色的十六进制值，格式为 "#RRGGBB"，如 "#FF6B6B"、"#000000"
+
+
+只返回JSON对象，不要包含其他文字：
+```json
+{{
+    "font_color": "#RRGGBB",
+}}
+```
+""".format(content_hint=content_hint)
+    
+    logger.debug(f"[get_text_attribute_extraction_prompt] Final prompt:\n{prompt}")
+    return prompt
+
+
+def get_batch_text_attribute_extraction_prompt(text_elements_json: str) -> str:
+    """
+    生成批量文字属性提取的 prompt
+    
+    新逻辑：给模型提供全图和所有文本元素的 bbox 及内容，
+    让模型一次性分析所有文本的样式属性。
+    
+    Args:
+        text_elements_json: 文本元素列表的 JSON 字符串，每个元素包含：
+            - element_id: 元素唯一标识
+            - bbox: 边界框 [x0, y0, x1, y1]
+            - content: 文字内容
+    
+    Returns:
+        格式化后的 prompt 字符串
+    """
+    prompt = f"""你是一位专业的 PPT/文档排版分析专家。请分析这张图片中所有标注的文字区域的样式属性。
+
+我已经从图片中提取了以下文字元素及其位置信息：
+
+```json
+{text_elements_json}
+```
+
+请仔细观察图片，对比每个文字区域在图片中的实际视觉效果，为每个元素分析以下属性：
+
+1. **font_color**: 字体颜色的十六进制值，格式为 "#RRGGBB"
+   - 请仔细观察文字的实际颜色，不要只返回黑色
+   - 常见颜色如：白色 "#FFFFFF"、蓝色 "#0066CC"、红色 "#FF0000" 等
+
+2. **is_bold**: 是否为粗体 (true/false)
+   - 观察笔画粗细，标题通常是粗体
+
+3. **is_italic**: 是否为斜体 (true/false)
+
+4. **is_underline**: 是否有下划线 (true/false)
+
+5. **text_alignment**: 文字对齐方式
+   - "left": 左对齐
+   - "center": 居中对齐
+   - "right": 右对齐
+   - "justify": 两端对齐
+   - 如果无法判断，根据文字在其区域内的位置推测
+
+请返回一个 JSON 数组，数组中每个对象对应输入的一个元素（按相同顺序），包含以下字段：
+- element_id: 与输入相同的元素ID
+- text_content: 文字内容
+- font_color: 颜色十六进制值
+- is_bold: 布尔值
+- is_italic: 布尔值
+- is_underline: 布尔值
+- text_alignment: 对齐方式字符串
+
+只返回 JSON 数组，不要包含其他文字：
+```json
+[
+    {{
+        "element_id": "xxx",
+        "text_content": "文字内容",
+        "font_color": "#RRGGBB",
+        "is_bold": true/false,
+        "is_italic": true/false,
+        "is_underline": true/false,
+        "text_alignment": "对齐方式"
+    }},
+    ...
+]
+```
+"""
+    
+    logger.debug(f"[get_batch_text_attribute_extraction_prompt] Final prompt:\n{prompt}")
+    return prompt
+
+
+def get_quality_enhancement_prompt(inpainted_regions: list = None) -> str:
+    """
+    生成画质提升的 prompt
+    用于在百度图像修复后，使用生成式模型提升整体画质
+    
+    Args:
+        inpainted_regions: 被修复区域列表，每个区域包含百分比坐标：
+            - left, top, right, bottom: 相对于图片宽高的百分比 (0-100)
+            - width_percent, height_percent: 区域宽高占图片的百分比
+    """
+    import json
+    
+    # 构建区域信息
+    regions_info = ""
+    if inpainted_regions and len(inpainted_regions) > 0:
+        regions_json = json.dumps(inpainted_regions, ensure_ascii=False, indent=2)
+        regions_info = f"""
+以下是被抹除工具处理过的具体区域（共 {len(inpainted_regions)} 个矩形区域），请重点修复这些位置：
+
+```json
+{regions_json}
+```
+
+坐标说明（所有数值都是相对于图片宽高的百分比，范围0-100%）：
+- left: 区域左边缘距离图片左边缘的百分比
+- top: 区域上边缘距离图片上边缘的百分比  
+- right: 区域右边缘距离图片左边缘的百分比
+- bottom: 区域下边缘距离图片上边缘的百分比
+- width_percent: 区域宽度占图片宽度的百分比
+- height_percent: 区域高度占图片高度的百分比
+
+例如：left=10 表示区域从图片左侧10%的位置开始。
+"""
+    
+    prompt = f"""\
+你是一位专业的图像修复专家。这张ppt页面图片刚刚经过了文字/对象抹除操作，抹除工具在指定区域留下了一些修复痕迹，包括：
+- 色块不均匀、颜色不连贯
+- 模糊的斑块或涂抹痕迹
+- 与周围背景不协调的区域，比如不和谐的渐变色块
+- 可能的纹理断裂或图案不连续
+{regions_info}
+你的任务是修复这些抹除痕迹，让图片看起来像从未有过对象抹除操作一样自然。
+
+要求：
+- **重点修复上述标注的区域**：这些区域刚刚经过抹除处理，需要让它们与周围背景完美融合
+- 保持纹理、颜色、图案的连续性
+- 提升整体画质，消除模糊、噪点、伪影
+- 保持图片的原始构图、布局、色调风格
+- 禁止添加任何文字、图表、插画、图案元素
+- 除了上述区域，其他区域不要做任何修改，保持和原图像素级别地一致。
+- 输出图片的尺寸必须与原图一致
+
+请输出修复后的高清ppt页面背景图片，不要遗漏修复任何一个被涂抹的区域。
+"""
+    return prompt

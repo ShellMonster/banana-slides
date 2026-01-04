@@ -7,7 +7,9 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, List, Dict, Any
 from datetime import datetime
-from models import db, Task, Page, Material
+from sqlalchemy import func
+from models import db, Task, Page, Material, PageImageVersion
+from utils import get_filtered_pages
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -29,8 +31,20 @@ class TaskManager:
         with self.lock:
             self.active_tasks[task_id] = future
         
-        # Add callback to clean up when done
-        future.add_done_callback(lambda f: self._cleanup_task(task_id))
+        # Add callback to clean up when done and log exceptions
+        future.add_done_callback(lambda f: self._task_done_callback(task_id, f))
+    
+    def _task_done_callback(self, task_id: str, future):
+        """Handle task completion and log any exceptions"""
+        try:
+            # Check if task raised an exception
+            exception = future.exception()
+            if exception:
+                logger.error(f"Task {task_id} failed with exception: {exception}", exc_info=exception)
+        except Exception as e:
+            logger.error(f"Error in task callback for {task_id}: {e}", exc_info=True)
+        finally:
+            self._cleanup_task(task_id)
     
     def _cleanup_task(self, task_id: str):
         """Clean up completed task"""
@@ -50,6 +64,66 @@ class TaskManager:
 
 # Global task manager instance
 task_manager = TaskManager(max_workers=4)
+
+
+def save_image_with_version(image, project_id: str, page_id: str, file_service, 
+                            page_obj=None, image_format: str = 'PNG') -> tuple[str, int]:
+    """
+    保存图片并创建历史版本记录的公共函数
+    
+    Args:
+        image: PIL Image 对象
+        project_id: 项目ID
+        page_id: 页面ID
+        file_service: FileService 实例
+        page_obj: Page 对象（可选，如果提供则更新页面状态）
+        image_format: 图片格式，默认 PNG
+    
+    Returns:
+        tuple: (image_path, version_number) - 图片路径和版本号
+    
+    这个函数会：
+    1. 计算下一个版本号（使用 MAX 查询确保安全）
+    2. 标记所有旧版本为非当前版本
+    3. 保存图片到最终位置
+    4. 创建新版本记录
+    5. 如果提供了 page_obj，更新页面状态和图片路径
+    """
+    # 使用 MAX 查询确保版本号安全（即使有版本被删除也不会重复）
+    max_version = db.session.query(func.max(PageImageVersion.version_number)).filter_by(page_id=page_id).scalar() or 0
+    next_version = max_version + 1
+    
+    # 批量更新：标记所有旧版本为非当前版本（使用单条 SQL 更高效）
+    PageImageVersion.query.filter_by(page_id=page_id).update({'is_current': False})
+    
+    # 保存图片到最终位置（使用版本号）
+    image_path = file_service.save_generated_image(
+        image, project_id, page_id,
+        version_number=next_version,
+        image_format=image_format
+    )
+    
+    # 创建新版本记录
+    new_version = PageImageVersion(
+        page_id=page_id,
+        image_path=image_path,
+        version_number=next_version,
+        is_current=True
+    )
+    db.session.add(new_version)
+    
+    # 如果提供了 page_obj，更新页面状态和图片路径
+    if page_obj:
+        page_obj.generated_image_path = image_path
+        page_obj.status = 'COMPLETED'
+        page_obj.updated_at = datetime.utcnow()
+    
+    # 提交事务
+    db.session.commit()
+    
+    logger.debug(f"Page {page_id} image saved as version {next_version}: {image_path}")
+    
+    return image_path, next_version
 
 
 def generate_descriptions_task(task_id: str, project_id: str, ai_service, 
@@ -117,6 +191,10 @@ def generate_descriptions_task(task_id: str, project_id: str, ai_service,
                 # 关键修复：在子线程中也需要应用上下文
                 with app.app_context():
                     try:
+                        # Get singleton AI service instance
+                        from services.ai_service_manager import get_ai_service
+                        ai_service = get_ai_service()
+                        
                         desc_text = ai_service.generate_page_description(
                             project_context, outline, page_outline, page_index,
                             language=language
@@ -201,7 +279,8 @@ def generate_images_task(task_id: str, project_id: str, ai_service, file_service
                         max_workers: int = 8, aspect_ratio: str = "16:9",
                         resolution: str = "2K", app=None,
                         extra_requirements: str = None,
-                        language: str = None):
+                        language: str = None,
+                        page_ids: list = None):
     """
     Background task for generating page images
     Based on demo.py gen_images_parallel()
@@ -210,6 +289,7 @@ def generate_images_task(task_id: str, project_id: str, ai_service, file_service
     
     Args:
         language: Output language (zh, en, ja, auto)
+        page_ids: Optional list of page IDs to generate (if not provided, generates all pages)
     """
     if app is None:
         raise ValueError("Flask app instance must be provided")
@@ -224,16 +304,12 @@ def generate_images_task(task_id: str, project_id: str, ai_service, file_service
             task.status = 'PROCESSING'
             db.session.commit()
             
-            # Get all pages for this project
-            pages = Page.query.filter_by(project_id=project_id).order_by(Page.order_index).all()
+            # Get pages for this project (filtered by page_ids if provided)
+            pages = get_filtered_pages(project_id, page_ids)
             pages_data = ai_service.flatten_outline(outline)
             
-            # Get template path if use_template
-            ref_image_path = None
-            if use_template:
-                ref_image_path = file_service.get_template_path(project_id)
-                if not ref_image_path:
-                    raise ValueError("No template image found for project")
+            # 注意：不在任务开始时获取模板路径，而是在每个子线程中动态获取
+            # 这样可以确保即使用户在上传新模板后立即生成，也能使用最新模板
             
             # Initialize progress
             task.set_progress({
@@ -295,19 +371,27 @@ def generate_images_task(task_id: str, project_id: str, ai_service, file_service
                                 page_additional_ref_images = image_urls
                                 has_material_images = True
                         
+                        # 在子线程中动态获取模板路径，确保使用最新模板
+                        page_ref_image_path = None
+                        if use_template:
+                            page_ref_image_path = file_service.get_template_path(project_id)
+                            # 注意：如果有风格描述，即使没有模板图片也允许生成
+                            # 这个检查已经在 controller 层完成，这里不再检查
+                        
                         # Generate image prompt
                         prompt = ai_service.generate_image_prompt(
                             outline, page_data, desc_text, page_index,
                             has_material_images=has_material_images,
                             extra_requirements=extra_requirements,
-                            language=language
+                            language=language,
+                            has_template=use_template
                         )
                         logger.debug(f"Generated image prompt for page {page_id}")
                         
                         # Generate image
                         logger.info(f"🎨 Calling AI service to generate image for page {page_index}/{len(pages)}...")
                         image = ai_service.generate_image(
-                            prompt, ref_image_path, aspect_ratio, resolution,
+                            prompt, page_ref_image_path, aspect_ratio, resolution,
                             additional_ref_images=page_additional_ref_images if page_additional_ref_images else None
                         )
                         logger.info(f"✅ Image generated successfully for page {page_index}")
@@ -315,9 +399,10 @@ def generate_images_task(task_id: str, project_id: str, ai_service, file_service
                         if not image:
                             raise ValueError("Failed to generate image")
                         
-                        # Save image
-                        image_path = file_service.save_generated_image(
-                            image, project_id, page_id
+                        # 优化：直接在子线程中计算版本号并保存到最终位置
+                        # 每个页面独立，使用数据库事务保证版本号原子性，避免临时文件
+                        image_path, next_version = save_image_with_version(
+                            image, project_id, page_id, file_service, page_obj=page_obj
                         )
                         
                         return (page_id, image_path, None)
@@ -340,21 +425,20 @@ def generate_images_task(task_id: str, project_id: str, ai_service, file_service
                 for future in as_completed(futures):
                     page_id, image_path, error = future.result()
                     
-                    
                     db.session.expire_all()
                     
-                    # Update page in database
+                    # Update page in database (主要是为了更新失败状态)
                     page = Page.query.get(page_id)
                     if page:
                         if error:
                             page.status = 'FAILED'
                             failed += 1
+                            db.session.commit()
                         else:
-                            page.generated_image_path = image_path
-                            page.status = 'COMPLETED'
+                            # 图片已在子线程中保存并创建版本记录，这里只需要更新计数
                             completed += 1
-                        
-                        db.session.commit()
+                            # 刷新页面对象以获取最新状态
+                            db.session.refresh(page)
                     
                     # Update task progress
                     task = Task.query.get(task_id)
@@ -451,8 +535,8 @@ def generate_single_page_image_task(task_id: str, project_id: str, page_id: str,
             ref_image_path = None
             if use_template:
                 ref_image_path = file_service.get_template_path(project_id)
-                if not ref_image_path:
-                    raise ValueError("No template image found for project")
+                # 注意：如果有风格描述，即使没有模板图片也允许生成
+                # 这个检查已经在 controller 层完成，这里不再检查
             
             # Generate image prompt
             page_data = page.get_outline_content() or {}
@@ -463,7 +547,8 @@ def generate_single_page_image_task(task_id: str, project_id: str, page_id: str,
                 outline, page_data, desc_text, page.order_index + 1,
                 has_material_images=has_material_images,
                 extra_requirements=extra_requirements,
-                language=language
+                language=language,
+                has_template=use_template
             )
             
             # Generate image
@@ -476,34 +561,10 @@ def generate_single_page_image_task(task_id: str, project_id: str, page_id: str,
             if not image:
                 raise ValueError("Failed to generate image")
             
-            # Calculate next version number
-            from models import PageImageVersion
-            existing_versions = PageImageVersion.query.filter_by(page_id=page_id).all()
-            next_version = len(existing_versions) + 1
-            
-            # Save image with version number
-            image_path = file_service.save_generated_image(
-                image, project_id, page_id, 
-                version_number=next_version
+            # 保存图片并创建历史版本记录
+            image_path, next_version = save_image_with_version(
+                image, project_id, page_id, file_service, page_obj=page
             )
-            
-            # Mark all previous versions as not current
-            for version in existing_versions:
-                version.is_current = False
-            
-            # Create new version record
-            new_version = PageImageVersion(
-                page_id=page_id,
-                image_path=image_path,
-                version_number=next_version,
-                is_current=True
-            )
-            db.session.add(new_version)
-            
-            # Update page with current image path
-            page.generated_image_path = image_path
-            page.status = 'COMPLETED'
-            page.updated_at = datetime.utcnow()
             
             # Mark task as completed
             task.status = 'COMPLETED'
@@ -599,34 +660,10 @@ def edit_page_image_task(task_id: str, project_id: str, page_id: str,
             if not image:
                 raise ValueError("Failed to edit image")
             
-            # Calculate next version number
-            from models import PageImageVersion
-            existing_versions = PageImageVersion.query.filter_by(page_id=page_id).all()
-            next_version = len(existing_versions) + 1
-            
-            # Save edited image with version number
-            image_path = file_service.save_generated_image(
-                image, project_id, page_id,
-                version_number=next_version
+            # 保存编辑后的图片并创建历史版本记录
+            image_path, next_version = save_image_with_version(
+                image, project_id, page_id, file_service, page_obj=page
             )
-            
-            # Mark all previous versions as not current
-            for version in existing_versions:
-                version.is_current = False
-            
-            # Create new version record
-            new_version = PageImageVersion(
-                page_id=page_id,
-                image_path=image_path,
-                version_number=next_version,
-                is_current=True
-            )
-            db.session.add(new_version)
-            
-            # Update page with current image path
-            page.generated_image_path = image_path
-            page.status = 'COMPLETED'
-            page.updated_at = datetime.utcnow()
             
             # Mark task as completed
             task.status = 'COMPLETED'
@@ -763,3 +800,201 @@ def generate_material_image_task(task_id: str, project_id: str, prompt: str,
                 temp_path = Path(temp_dir)
                 if temp_path.exists():
                     shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def export_editable_pptx_with_recursive_analysis_task(
+    task_id: str, 
+    project_id: str, 
+    filename: str,
+    file_service,
+    page_ids: list = None,
+    max_depth: int = 2,
+    max_workers: int = 4,
+    app=None
+):
+    """
+    使用递归图片可编辑化分析导出可编辑PPTX的后台任务
+    
+    这是新的架构方法，使用ImageEditabilityService进行递归版面分析。
+    与旧方法的区别：
+    - 不再假设图片是16:9
+    - 支持任意尺寸和分辨率
+    - 递归分析图片中的子图和图表
+    - 更智能的坐标映射和元素提取
+    - 不需要 ai_service（使用 ImageEditabilityService 和 MinerU）
+    
+    Args:
+        task_id: 任务ID
+        project_id: 项目ID
+        filename: 输出文件名
+        file_service: 文件服务实例
+        page_ids: 可选的页面ID列表（如果提供，只导出这些页面）
+        max_depth: 最大递归深度
+        max_workers: 并发处理数
+        app: Flask应用实例
+    """
+    logger.info(f"🚀 Task {task_id} started: export_editable_pptx_with_recursive_analysis (project={project_id}, depth={max_depth}, workers={max_workers})")
+    
+    if app is None:
+        raise ValueError("Flask app instance must be provided")
+    
+    with app.app_context():
+        import os
+        from datetime import datetime
+        from PIL import Image
+        from models import Project
+        from services.export_service import ExportService
+        
+        logger.info(f"开始递归分析导出任务 {task_id} for project {project_id}")
+        
+        try:
+            # Get project
+            project = Project.query.get(project_id)
+            if not project:
+                raise ValueError(f'Project {project_id} not found')
+            
+            # Get pages (filtered by page_ids if provided)
+            pages = get_filtered_pages(project_id, page_ids)
+            if not pages:
+                raise ValueError('No pages found for project')
+            
+            image_paths = []
+            for page in pages:
+                if page.generated_image_path:
+                    img_path = file_service.get_absolute_path(page.generated_image_path)
+                    if os.path.exists(img_path):
+                        image_paths.append(img_path)
+            
+            if not image_paths:
+                raise ValueError('No generated images found for project')
+            
+            logger.info(f"找到 {len(image_paths)} 张图片")
+            
+            # 初始化任务进度（包含消息日志）
+            task = Task.query.get(task_id)
+            task.set_progress({
+                "total": 100,  # 使用百分比
+                "completed": 0,
+                "failed": 0,
+                "current_step": "准备中...",
+                "percent": 0,
+                "messages": ["🚀 开始导出可编辑PPTX..."]  # 消息日志
+            })
+            db.session.commit()
+            
+            # 进度回调函数 - 更新数据库中的进度
+            progress_messages = ["🚀 开始导出可编辑PPTX..."]
+            max_messages = 10  # 最多保留最近10条消息
+            
+            def progress_callback(step: str, message: str, percent: int):
+                """更新任务进度到数据库"""
+                nonlocal progress_messages
+                try:
+                    # 添加新消息到日志
+                    new_message = f"[{step}] {message}"
+                    progress_messages.append(new_message)
+                    # 只保留最近的消息
+                    if len(progress_messages) > max_messages:
+                        progress_messages = progress_messages[-max_messages:]
+                    
+                    # 更新数据库
+                    task = Task.query.get(task_id)
+                    if task:
+                        task.set_progress({
+                            "total": 100,
+                            "completed": percent,
+                            "failed": 0,
+                            "current_step": message,
+                            "percent": percent,
+                            "messages": progress_messages.copy()
+                        })
+                        db.session.commit()
+                except Exception as e:
+                    logger.warning(f"更新进度失败: {e}")
+            
+            # Step 1: 准备工作
+            logger.info("Step 1: 准备工作...")
+            progress_callback("准备", f"找到 {len(image_paths)} 张幻灯片图片", 2)
+            
+            # 准备输出路径
+            exports_dir = os.path.join(app.config['UPLOAD_FOLDER'], project_id, 'exports')
+            os.makedirs(exports_dir, exist_ok=True)
+            
+            # Handle filename collision
+            if not filename.endswith('.pptx'):
+                filename += '.pptx'
+            
+            output_path = os.path.join(exports_dir, filename)
+            if os.path.exists(output_path):
+                base_name = filename.rsplit('.', 1)[0]
+                timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+                filename = f"{base_name}_{timestamp}.pptx"
+                output_path = os.path.join(exports_dir, filename)
+                logger.info(f"文件名冲突，使用新文件名: {filename}")
+            
+            # 获取第一张图片的尺寸作为参考
+            first_img = Image.open(image_paths[0])
+            slide_width, slide_height = first_img.size
+            first_img.close()
+            
+            logger.info(f"幻灯片尺寸: {slide_width}x{slide_height}")
+            logger.info(f"递归深度: {max_depth}, 并发数: {max_workers}")
+            progress_callback("准备", f"幻灯片尺寸: {slide_width}×{slide_height}", 3)
+            
+            # Step 2: 创建文字属性提取器
+            from services.image_editability import TextAttributeExtractorFactory
+            text_attribute_extractor = TextAttributeExtractorFactory.create_caption_model_extractor()
+            progress_callback("准备", "文字属性提取器已初始化", 5)
+            
+            # Step 3: 调用导出方法（配置自动从 Flask config 获取）
+            logger.info("Step 3: 创建可编辑PPTX...")
+            ExportService.create_editable_pptx_with_recursive_analysis(
+                image_paths=image_paths,
+                output_file=output_path,
+                slide_width_pixels=slide_width,
+                slide_height_pixels=slide_height,
+                max_depth=max_depth,
+                max_workers=max_workers,
+                text_attribute_extractor=text_attribute_extractor,
+                progress_callback=progress_callback
+            )
+            
+            logger.info(f"✓ 可编辑PPTX已创建: {output_path}")
+            
+            # Step 4: 标记任务完成
+            download_path = f"/files/{project_id}/exports/{filename}"
+            
+            # 添加完成消息
+            progress_messages.append("✅ 导出完成！")
+            
+            task = Task.query.get(task_id)
+            if task:
+                task.status = 'COMPLETED'
+                task.completed_at = datetime.utcnow()
+                task.set_progress({
+                    "total": 100,
+                    "completed": 100,
+                    "failed": 0,
+                    "current_step": "✓ 导出完成",
+                    "percent": 100,
+                    "messages": progress_messages,
+                    "download_url": download_path,
+                    "filename": filename,
+                    "method": "recursive_analysis",
+                    "max_depth": max_depth
+                })
+                db.session.commit()
+                logger.info(f"✓ 任务 {task_id} 完成 - 递归分析导出成功（深度={max_depth}）")
+        
+        except Exception as e:
+            import traceback
+            error_detail = traceback.format_exc()
+            logger.error(f"✗ 任务 {task_id} 失败: {error_detail}")
+            
+            # 标记任务失败
+            task = Task.query.get(task_id)
+            if task:
+                task.status = 'FAILED'
+                task.error_message = str(e)
+                task.completed_at = datetime.utcnow()
+                db.session.commit()

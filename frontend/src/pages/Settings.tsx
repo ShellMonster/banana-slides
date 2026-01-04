@@ -183,8 +183,8 @@ const settingsSections: SectionConfig[] = [
   },
 ];
 
+// Settings 组件 - 纯嵌入模式（可复用）
 export const Settings: React.FC = () => {
-  const navigate = useNavigate();
   const { show, ToastContainer } = useToast();
   const { confirm, ConfirmDialog } = useConfirm();
 
@@ -400,17 +400,78 @@ export const Settings: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-banana-50 to-yellow-50 flex items-center justify-center">
-        <Loading text="加载设置中..." />
+      <div className="flex items-center justify-center py-12">
+        <Loading message="加载设置中..." />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-banana-50 to-yellow-50">
+    <>
       <ToastContainer />
       {ConfirmDialog}
+      <div className="space-y-8">
+        {/* 配置区块（配置驱动） */}
+        <div className="space-y-8">
+          {settingsSections.map((section) => (
+            <div key={section.title}>
+              <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
+                {section.icon}
+                <span className="ml-2">{section.title}</span>
+              </h2>
+              <div className="space-y-4">
+                {section.fields.map((field) => renderField(field))}
+                {section.title === '大模型 API 配置' && (
+                  <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                    <p className="text-sm text-gray-700">
+                      API 密匙获取可前往{' '}
+                      <a
+                        href="https://aihubmix.com/?aff=17EC"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:text-blue-800 underline font-medium"
+                      >
+                        AIHubmix
+                      </a>
+                      , 减小迁移成本
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
 
+        {/* 操作按钮 */}
+        <div className="flex items-center justify-between pt-4 border-t border-gray-200">
+          <Button
+            variant="secondary"
+            icon={<RotateCcw size={18} />}
+            onClick={handleReset}
+            disabled={isSaving}
+          >
+            重置为默认配置
+          </Button>
+          <Button
+            variant="primary"
+            icon={<Save size={18} />}
+            onClick={handleSave}
+            loading={isSaving}
+          >
+            {isSaving ? '保存中...' : '保存设置'}
+          </Button>
+        </div>
+      </div>
+    </>
+  );
+};
+
+// SettingsPage 组件 - 完整页面包装
+export const SettingsPage: React.FC = () => {
+  const navigate = useNavigate();
+  
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-banana-50 to-yellow-50">
       <div className="container mx-auto px-4 py-8 max-w-4xl">
         <Card className="p-6 md:p-8">
           <div className="space-y-8">
@@ -434,56 +495,7 @@ export const Settings: React.FC = () => {
               </div>
             </div>
 
-            {/* 配置区块（配置驱动） */}
-            <div className="space-y-8">
-              {settingsSections.map((section) => (
-                <div key={section.title}>
-                  <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
-                    {section.icon}
-                    <span className="ml-2">{section.title}</span>
-                  </h2>
-                  <div className="space-y-4">
-                    {section.fields.map((field) => renderField(field))}
-                    {section.title === '大模型 API 配置' && (
-                      <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                        <p className="text-sm text-gray-700">
-                          API 密匙获取可前往{' '}
-                          <a
-                            href="https://aihubmix.com/?aff=17EC"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-blue-600 hover:text-blue-800 underline font-medium"
-                          >
-                            AIHubmix
-                          </a>
-                          , 减小迁移成本
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* 操作按钮 */}
-            <div className="flex items-center justify-between pt-4 border-t border-gray-200">
-              <Button
-                variant="secondary"
-                icon={<RotateCcw size={18} />}
-                onClick={handleReset}
-                disabled={isSaving}
-              >
-                重置为默认配置
-              </Button>
-              <Button
-                variant="primary"
-                icon={<Save size={18} />}
-                onClick={handleSave}
-                loading={isSaving}
-              >
-                {isSaving ? '保存中...' : '保存设置'}
-              </Button>
-            </div>
+            <Settings />
           </div>
         </Card>
       </div>

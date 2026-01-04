@@ -321,7 +321,8 @@ class AIService:
                             page_desc: str, page_index: int, 
                             has_material_images: bool = False,
                             extra_requirements: Optional[str] = None,
-                            language='zh') -> str:
+                            language='zh',
+                            has_template: bool = True) -> str:
         """
         Generate image generation prompt for a page
         Based on demo.py gen_prompts()
@@ -333,6 +334,8 @@ class AIService:
             page_index: Page number (1-indexed)
             has_material_images: 是否有素材图片（从项目描述中提取的图片）
             extra_requirements: Optional extra requirements to apply to all pages
+            language: Output language
+            has_template: 是否有模板图片（False表示无模板图模式）
         
         Returns:
             Image generation prompt
@@ -355,7 +358,9 @@ class AIService:
             current_section=current_section,
             has_material_images=has_material_images,
             extra_requirements=extra_requirements,
-            language=language
+            language=language,
+            has_template=has_template,
+            page_index=page_index
         )
         
         return prompt

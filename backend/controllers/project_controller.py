@@ -1,16 +1,28 @@
 """
 Project Controller - handles project-related endpoints
 """
-import logging
-from flask import Blueprint, request, jsonify, current_app
-from werkzeug.exceptions import BadRequest
-from models import db, Project, Page, Task, ReferenceFile
-from utils import success_response, error_response, not_found, bad_request
-from services import AIService, ProjectContext
-from services.task_manager import task_manager, generate_descriptions_task, generate_images_task
 import json
+import logging
 import traceback
 from datetime import datetime
+
+from flask import Blueprint, request, jsonify, current_app
+from sqlalchemy import desc
+from sqlalchemy.orm import joinedload
+from werkzeug.exceptions import BadRequest
+
+from models import db, Project, Page, Task, ReferenceFile
+from services import ProjectContext
+from services.ai_service_manager import get_ai_service
+from services.task_manager import (
+    task_manager,
+    generate_descriptions_task,
+    generate_images_task
+)
+from utils import (
+    success_response, error_response, not_found, bad_request,
+    parse_page_ids_from_body, get_filtered_pages
+)
 
 logger = logging.getLogger(__name__)
 
@@ -108,21 +120,37 @@ def list_projects():
     GET /api/projects - Get all projects (for history)
     
     Query params:
-    - limit: number of projects to return (default: 50)
+    - limit: number of projects to return (default: 50, max: 100)
     - offset: offset for pagination (default: 0)
     """
     try:
-        from sqlalchemy import desc
-        
+        # Parameter validation
         limit = request.args.get('limit', 50, type=int)
         offset = request.args.get('offset', 0, type=int)
         
-        # Get projects ordered by updated_at descending
-        projects = Project.query.order_by(desc(Project.updated_at)).limit(limit).offset(offset).all()
+        # Enforce limits to prevent performance issues
+        limit = min(max(1, limit), 100)  # Between 1-100
+        offset = max(0, offset)  # Non-negative
+        
+        # Fetch limit + 1 items to check for more pages efficiently
+        # This avoids a second database query
+        projects_with_extra = Project.query\
+            .options(joinedload(Project.pages))\
+            .order_by(desc(Project.updated_at))\
+            .limit(limit + 1)\
+            .offset(offset)\
+            .all()
+        
+        # Check if there are more items beyond the current page
+        has_more = len(projects_with_extra) > limit
+        # Return only the requested limit
+        projects = projects_with_extra[:limit]
         
         return success_response({
             'projects': [project.to_dict(include_pages=True) for project in projects],
-            'total': Project.query.count()
+            'has_more': has_more,
+            'limit': limit,
+            'offset': offset
         })
     
     except Exception as e:
@@ -165,6 +193,7 @@ def create_project():
             idea_prompt=data.get('idea_prompt'),
             outline_text=data.get('outline_text'),
             description_text=data.get('description_text'),
+            template_style=data.get('template_style'),
             status='DRAFT'
         )
         
@@ -196,7 +225,11 @@ def get_project(project_id):
     GET /api/projects/{project_id} - Get project details
     """
     try:
-        project = Project.query.get(project_id)
+        # Use eager loading to load project and related pages
+        project = Project.query\
+            .options(joinedload(Project.pages))\
+            .filter(Project.id == project_id)\
+            .first()
         
         if not project:
             return not_found('Project')
@@ -220,7 +253,11 @@ def update_project(project_id):
     }
     """
     try:
-        project = Project.query.get(project_id)
+        # Use eager loading to load project and pages (for page order updates)
+        project = Project.query\
+            .options(joinedload(Project.pages))\
+            .filter(Project.id == project_id)\
+            .first()
         
         if not project:
             return not_found('Project')
@@ -235,13 +272,26 @@ def update_project(project_id):
         if 'extra_requirements' in data:
             project.extra_requirements = data['extra_requirements']
         
+        # Update template_style if provided
+        if 'template_style' in data:
+            project.template_style = data['template_style']
+        
         # Update page order if provided
         if 'pages_order' in data:
             pages_order = data['pages_order']
+            # Optimization: batch query all pages to update, avoiding N+1 queries
+            pages_to_update = Page.query.filter(
+                Page.id.in_(pages_order),
+                Page.project_id == project_id
+            ).all()
+            
+            # Create page_id -> page mapping for O(1) lookup
+            pages_map = {page.id: page for page in pages_to_update}
+            
+            # Batch update order
             for index, page_id in enumerate(pages_order):
-                page = Page.query.get(page_id)
-                if page and page.project_id == project_id:
-                    page.order_index = index
+                if page_id in pages_map:
+                    pages_map[page_id].order_index = index
         
         project.updated_at = datetime.utcnow()
         db.session.commit()
@@ -302,8 +352,8 @@ def generate_outline(project_id):
         if not project:
             return not_found('Project')
         
-        # Initialize AI service
-        ai_service = AIService()
+        # Get singleton AI service instance
+        ai_service = get_ai_service()
         
         # Get request data and language parameter
         data = request.get_json() or {}
@@ -347,6 +397,7 @@ def generate_outline(project_id):
         pages_data = ai_service.flatten_outline(outline)
         
         # Delete existing pages (using ORM session to trigger cascades)
+        # Note: Cannot use bulk delete as it bypasses ORM cascades for PageImageVersion
         old_pages = Page.query.filter_by(project_id=project_id).all()
         for old_page in old_pages:
             db.session.delete(old_page)
@@ -424,8 +475,8 @@ def generate_from_description(project_id):
         
         project.description_text = description_text
         
-        # Initialize AI service
-        ai_service = AIService()
+        # Get singleton AI service instance
+        ai_service = get_ai_service()
         
         # Get reference files content and create project context
         reference_files_content = _get_project_reference_files_content(project_id)
@@ -556,8 +607,8 @@ def generate_descriptions(project_id):
         db.session.add(task)
         db.session.commit()
         
-        # Initialize AI service
-        ai_service = AIService()
+        # Get singleton AI service instance
+        ai_service = get_ai_service()
         
         # Get reference files content and create project context
         reference_files_content = _get_project_reference_files_content(project_id)
@@ -604,7 +655,8 @@ def generate_images(project_id):
     {
         "max_workers": 8,
         "use_template": true,
-        "language": "zh"  # output language: zh, en, ja, auto
+        "language": "zh",  # output language: zh, en, ja, auto
+        "page_ids": ["id1", "id2"]  # optional: specific page IDs to generate (if not provided, generates all)
     }
     """
     try:
@@ -619,8 +671,11 @@ def generate_images(project_id):
         # IMPORTANT: Expire cached objects to ensure fresh data
         db.session.expire_all()
         
-        # Get pages
-        pages = Page.query.filter_by(project_id=project_id).order_by(Page.order_index).all()
+        data = request.get_json() or {}
+        
+        # Get page_ids from request body and fetch filtered pages
+        selected_page_ids = parse_page_ids_from_body(data)
+        pages = get_filtered_pages(project_id, selected_page_ids if selected_page_ids else None)
         
         if not pages:
             return bad_request("No pages found for project")
@@ -628,7 +683,6 @@ def generate_images(project_id):
         # Reconstruct outline from pages with part structure
         outline = _reconstruct_outline_from_pages(pages)
         
-        data = request.get_json() or {}
         # 从配置中读取默认并发数，如果请求中提供了则使用请求的值
         max_workers = data.get('max_workers', current_app.config.get('MAX_IMAGE_WORKERS', 8))
         use_template = data.get('use_template', True)
@@ -649,11 +703,17 @@ def generate_images(project_id):
         db.session.add(task)
         db.session.commit()
         
-        # Initialize services
-        ai_service = AIService()
+        # Get singleton AI service instance
+        ai_service = get_ai_service()
         
         from services import FileService
         file_service = FileService(current_app.config['UPLOAD_FOLDER'])
+        
+        # 合并额外要求和风格描述
+        combined_requirements = project.extra_requirements or ""
+        if project.template_style:
+            style_requirement = f"\n\nppt页面风格描述：\n\n{project.template_style}"
+            combined_requirements = combined_requirements + style_requirement
         
         # Get app instance for background task
         app = current_app._get_current_object()
@@ -671,8 +731,9 @@ def generate_images(project_id):
             current_app.config['DEFAULT_ASPECT_RATIO'],
             current_app.config['DEFAULT_RESOLUTION'],
             app,
-            project.extra_requirements,
-            language
+            combined_requirements if combined_requirements.strip() else None,
+            language,
+            selected_page_ids if selected_page_ids else None
         )
         
         # Update project status
@@ -747,8 +808,8 @@ def refine_outline(project_id):
         else:
             current_outline = _reconstruct_outline_from_pages(pages)
         
-        # Initialize AI service
-        ai_service = AIService()
+        # Get singleton AI service instance
+        ai_service = get_ai_service()
         
         # Get reference files content and create project context
         reference_files_content = _get_project_reference_files_content(project_id)
@@ -916,8 +977,8 @@ def refine_descriptions(project_id):
                 'description_content': desc_content if desc_content else ''
             })
         
-        # Initialize AI service
-        ai_service = AIService()
+        # Get singleton AI service instance
+        ai_service = get_ai_service()
         
         # Get reference files content and create project context
         reference_files_content = _get_project_reference_files_content(project_id)

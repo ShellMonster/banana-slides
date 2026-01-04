@@ -223,6 +223,5 @@ if __name__ == '__main__':
         f"Uploads: {app.config['UPLOAD_FOLDER']}"
     )
     
-    # Enable reloader for hot reload in development
     # Using absolute paths for database, so WSL path issues should not occur
-    app.run(host='0.0.0.0', port=port, debug=debug, use_reloader=True)
+    app.run(host='0.0.0.0', port=port, debug=debug, use_reloader=False)

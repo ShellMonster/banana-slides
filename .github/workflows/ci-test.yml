@@ -2,6 +2,7 @@ name: Full Test Suite
 
 # Full tests run in these cases:
 # 1. Push to main/develop branch (direct push, not from PR merge)
+#    - 仅当代码文件变更时触发（排除 *.md 文件）
 # 2. PR labeled with ready-for-test
 # 3. Manual trigger (workflow_dispatch)
 #
@@ -10,6 +11,8 @@ name: Full Test Suite
 on:
   push:
     branches: [ main, develop ]
+    paths-ignore:
+      - '**/*.md'
   pull_request:
     types: [labeled]
     branches: [ main, develop ]
@@ -294,21 +297,45 @@ jobs:
           # Now uv is available in PATH
           uv sync --extra test
       
-      - name: Run Backend API Integration tests (requires running service)
+      # NOTE: API Full Flow test is commented out because UI E2E test covers the same flow
+      # UI E2E test is more comprehensive as it tests:
+      # - Frontend UI interactions
+      # - Template selection modal
+      # - Single card retry functionality
+      # - Complete user experience
+      # 
+      # If you need quick API validation without AI, use test_quick_api_flow_no_ai instead
+      # - name: Run Backend API Integration tests (requires running service)
+      #   if: steps.check_e2e.outputs.skip != 'true' && env.GOOGLE_API_KEY != '' && env.GOOGLE_API_KEY != 'mock-api-key-for-testing'
+      #   run: |
+      #     # Source cargo env to access uv
+      #     . "$HOME/.cargo/env"
+      #     
+      #     # Run API integration tests that require real running backend service
+      #     echo "Running Backend API integration tests with real service (Gemini format)"
+      #     cd backend
+      #     uv run pytest tests/integration/test_api_full_flow.py::TestAPIFullFlow::test_api_full_flow_create_to_export -v -m "integration and requires_service"
+      #   env:
+      #     # Ensure API key is not logged
+      #     GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      #     SKIP_SERVICE_TESTS: false
+      #   timeout-minutes: 15
+      #   continue-on-error: false
+      
+      - name: Run Quick API test (no AI, fast validation)
         if: steps.check_e2e.outputs.skip != 'true' && env.GOOGLE_API_KEY != '' && env.GOOGLE_API_KEY != 'mock-api-key-for-testing'
         run: |
           # Source cargo env to access uv
           . "$HOME/.cargo/env"
           
-          # Run API integration tests that require real running backend service
-          echo "Running Backend API integration tests with real service (Gemini format)"
+          # Run quick API test that only validates endpoints (no AI generation)
+          echo "Running quick Backend API test (no AI generation, fast feedback)"
           cd backend
-          uv run pytest tests/integration/test_api_full_flow.py -v -m "integration and requires_service"
+          uv run pytest tests/integration/test_api_full_flow.py::TestAPIFullFlow::test_quick_api_flow_no_ai -v -m "requires_service"
         env:
-          # Ensure API key is not logged
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           SKIP_SERVICE_TESTS: false
-        timeout-minutes: 15
+        timeout-minutes: 5
         continue-on-error: false
       
       - name: Run Frontend UI E2E tests
