@@ -319,6 +319,13 @@ Banana Slides 支持两种 API 格式，在网页设置中只需选择格式并�
    cd Downloads/banana-slides
    ```
 
+   > ⚠️ **注意**：从 GitHub 下载的 ZIP 压缩包解压后，文件夹名通常为 `banana-slides-main` 而不是 `banana-slides`。请根据实际文件夹名调整命令，例如：
+   > ```bash
+   > # 如果文件夹名是 banana-slides-main
+   > cd Downloads\banana-slides-main  # Windows
+   > cd Downloads/banana-slides-main  # macOS/Linux
+   > ```
+
 #### 🅱️ 开发者方案：使用 Git 克隆
 
 如果你已经安装了 Git，可以使用命令行克隆（后续更新更方便）：
@@ -1005,7 +1012,7 @@ flowchart LR
 3. 使用 PDF 合并工具：
    - macOS：预览 → 拖拽排序 → 导出
    - Windows：使用 Adobe Acrobat 或在线工具（如 ilovepdf.com）
-   - Linux：`pdfunite 原1.pdf 原2.pdf 合并.pdf`
+   - Linux：使用在线工具（如 ilovepdf.com）或安装 PDF 合并工具
 
 **方法 C：使用"移动/复制"功能**
 
